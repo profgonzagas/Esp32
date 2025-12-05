@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:ESP32Controller.ViewModels"
+             x:Class="ESP32Controller.Views.ConfiguracoesPage"
+             x:DataType="vm:ConfiguracoesViewModel"
+             Title="Configurações"
+             BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1A1A2E}">
+    
+    <ScrollView>
+        <VerticalStackLayout Spacing="16" Padding="16">
+            
+            <!-- Header -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="16"
+                   Padding="20"
+                   HasShadow="True">
+                <HorizontalStackLayout Spacing="12">
+                    <Label Text="⚙️" FontSize="32"/>
+                    <VerticalStackLayout>
+                        <Label Text="Configurações"
+                               FontSize="24"
+                               FontAttributes="Bold"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Label Text="Configure seu dispositivo ESP32"
+                               FontSize="14"
+                               TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                    </VerticalStackLayout>
+                </HorizontalStackLayout>
+            </Frame>
+            
+            <!-- Configurações do Dispositivo -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="16">
+                    <Label Text="📱 Dispositivo"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="Nome do Dispositivo"
+                               FontSize="12"
+                               TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                        <Entry Placeholder="Ex: ESP32 Sala"
+                               Text="{Binding NomeDispositivo}"
+                               BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    </VerticalStackLayout>
+                    
+                    <Grid ColumnDefinitions="*,120" ColumnSpacing="12">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Endereço IP"
+                                   FontSize="12"
+                                   TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                            <Entry Placeholder="192.168.1.100"
+                                   Text="{Binding EnderecoIP}"
+                                   Keyboard="Numeric"
+                                   BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                                   TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        </VerticalStackLayout>
+                        
+                        <VerticalStackLayout Grid.Column="1" Spacing="4">
+                            <Label Text="Porta"
+                                   FontSize="12"
+                                   TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                            <Entry Placeholder="80"
+                                   Text="{Binding Porta}"
+                                   Keyboard="Numeric"
+                                   BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                                   TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        </VerticalStackLayout>
+                    </Grid>
+                    
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="Endereço MAC (BLE)"
+                               FontSize="12"
+                               TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                        <Entry Placeholder="AA:BB:CC:DD:EE:FF"
+                               Text="{Binding EnderecoMAC}"
+                               BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    </VerticalStackLayout>
+                    
+                    <Button Text="🔍 Testar Conexão"
+                            Command="{Binding TestarConexaoCommand}"
+                            BackgroundColor="#2196F3"
+                            TextColor="White"
+                            CornerRadius="8"
+                            IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Configurações de Aparência -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="16">
+                    <Label Text="🎨 Aparência"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Grid ColumnDefinitions="*,Auto">
+                        <VerticalStackLayout>
+                            <Label Text="Tema Escuro"
+                                   FontSize="14"
+                                   TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                            <Label Text="Interface com cores escuras"
+                                   FontSize="12"
+                                   TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                        </VerticalStackLayout>
+                        <Switch Grid.Column="1"
+                                IsToggled="{Binding TemaEscuro}"
+                                OnColor="#4CAF50"/>
+                    </Grid>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Botões de Ação -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="12">
+                    <Button Text="💾 Salvar Configurações"
+                            Command="{Binding SalvarCommand}"
+                            BackgroundColor="#4CAF50"
+                            TextColor="White"
+                            FontAttributes="Bold"
+                            CornerRadius="8"
+                            HeightRequest="48"/>
+                    
+                    <Button Text="🔄 Resetar para Padrão"
+                            Command="{Binding ResetarCommand}"
+                            BackgroundColor="#FF5722"
+                            TextColor="White"
+                            CornerRadius="8"
+                            HeightRequest="48"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Informações do App -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#E8F5E9, Dark=#1B5E20}"
+                   CornerRadius="12"
+                   Padding="16">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="ℹ️ Sobre o App"
+                           FontSize="14"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#2E7D32, Dark=#A5D6A7}"/>
+                    <Label Text="ESP32 Controller v1.0"
+                           FontSize="12"
+                           TextColor="{AppThemeBinding Light=#2E7D32, Dark=#A5D6A7}"/>
+                    <Label Text="Desenvolvido com .NET MAUI"
+                           FontSize="12"
+                           TextColor="{AppThemeBinding Light=#2E7D32, Dark=#A5D6A7}"/>
+                    <Label Text="Controle seu ESP32 via WiFi ou Bluetooth"
+                           FontSize="12"
+                           TextColor="{AppThemeBinding Light=#2E7D32, Dark=#A5D6A7}"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Loading -->
+            <ActivityIndicator IsRunning="{Binding IsBusy}"
+                               IsVisible="{Binding IsBusy}"
+                               Color="#4CAF50"/>
+            
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

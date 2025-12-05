@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:ESP32Controller.ViewModels"
+             xmlns:services="clr-namespace:ESP32Controller.Services"
+             x:Class="ESP32Controller.Views.BLEControlPage"
+             x:DataType="vm:BLEControlViewModel"
+             Title="Controle Bluetooth"
+             BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1A1A2E}">
+    
+    <ScrollView>
+        <VerticalStackLayout Spacing="16" Padding="16">
+            
+            <!-- Status de Conexão -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="16"
+                   Padding="20"
+                   HasShadow="True">
+                <Grid ColumnDefinitions="*,Auto">
+                    <VerticalStackLayout>
+                        <Label Text="📶 Conexão Bluetooth"
+                               FontSize="20"
+                               FontAttributes="Bold"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Label Text="{Binding StatusTexto}"
+                               FontSize="14"
+                               TextColor="{Binding StatusCor}"/>
+                    </VerticalStackLayout>
+                    <ActivityIndicator Grid.Column="1"
+                                       IsRunning="{Binding Escaneando}"
+                                       Color="#2196F3"/>
+                </Grid>
+            </Frame>
+            
+            <!-- Scan de Dispositivos -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="🔍 Dispositivos BLE"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Button Text="{Binding Escaneando, Converter={StaticResource BoolToScanTextConverter}}"
+                            Command="{Binding EscanearCommand}"
+                            BackgroundColor="#2196F3"
+                            TextColor="White"
+                            CornerRadius="8"
+                            IsEnabled="{Binding Escaneando, Converter={StaticResource InvertedBoolConverter}}"/>
+                    
+                    <!-- Lista de Dispositivos -->
+                    <CollectionView ItemsSource="{Binding Dispositivos}"
+                                    SelectionMode="Single"
+                                    SelectedItem="{Binding DispositivoSelecionado}"
+                                    HeightRequest="150">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="services:DispositivoBLE">
+                                <Frame BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                                       CornerRadius="8"
+                                       Padding="12"
+                                       Margin="0,4">
+                                    <Grid ColumnDefinitions="Auto,*,Auto">
+                                        <Label Text="📱"
+                                               FontSize="24"
+                                               VerticalOptions="Center"/>
+                                        <VerticalStackLayout Grid.Column="1" Margin="12,0">
+                                            <Label Text="{Binding Nome}"
+                                                   FontSize="14"
+                                                   FontAttributes="Bold"
+                                                   TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                                            <Label Text="{Binding Id}"
+                                                   FontSize="10"
+                                                   TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                                        </VerticalStackLayout>
+                                        <VerticalStackLayout Grid.Column="2" HorizontalOptions="End">
+                                            <Label Text="{Binding SinalQualidade}"
+                                                   FontSize="10"
+                                                   TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                                            <Label Text="{Binding Rssi, StringFormat='{0} dBm'}"
+                                                   FontSize="10"
+                                                   TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                                        </VerticalStackLayout>
+                                    </Grid>
+                                </Frame>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                        <CollectionView.EmptyView>
+                            <Label Text="Nenhum dispositivo encontrado. Clique em Escanear."
+                                   HorizontalOptions="Center"
+                                   TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"
+                                   Margin="0,20"/>
+                        </CollectionView.EmptyView>
+                    </CollectionView>
+                    
+                    <Button Text="{Binding BotaoConectarTexto}"
+                            Command="{Binding ConectarCommand}"
+                            BackgroundColor="{Binding Conectado, Converter={StaticResource BoolToConnectColorConverter}}"
+                            TextColor="White"
+                            CornerRadius="8"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Controles de LED (BLE) -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True"
+                   IsEnabled="{Binding Conectado}">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="💡 Controle de LED (BLE)"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                        <Button Text="ON"
+                                Command="{Binding LigarLedCommand}"
+                                BackgroundColor="#4CAF50"
+                                TextColor="White"
+                                CornerRadius="8"/>
+                        <Button Grid.Column="1"
+                                Text="OFF"
+                                Command="{Binding DesligarLedCommand}"
+                                BackgroundColor="#F44336"
+                                TextColor="White"
+                                CornerRadius="8"/>
+                        <Button Grid.Column="2"
+                                Text="Toggle"
+                                Command="{Binding ToggleLedCommand}"
+                                BackgroundColor="#FF9800"
+                                TextColor="White"
+                                CornerRadius="8"/>
+                    </Grid>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Comando Customizado BLE -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True"
+                   IsEnabled="{Binding Conectado}">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="🛠️ Comando BLE Customizado"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Entry Placeholder="Digite o comando (ex: LED_ON)"
+                           Text="{Binding ComandoCustom}"
+                           BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                        <Button Text="📤 Enviar"
+                                Command="{Binding EnviarComandoCommand}"
+                                BackgroundColor="#2196F3"
+                                TextColor="White"
+                                CornerRadius="8"/>
+                        <Button Grid.Column="1"
+                                Text="📊 Status"
+                                Command="{Binding SolicitarStatusCommand}"
+                                BackgroundColor="#9C27B0"
+                                TextColor="White"
+                                CornerRadius="8"/>
+                    </Grid>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Resposta BLE -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="📨 Resposta BLE"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Frame BackgroundColor="{AppThemeBinding Light=#1E1E1E, Dark=#0F3460}"
+                           CornerRadius="8"
+                           Padding="12"
+                           MinimumHeightRequest="80">
+                        <Label Text="{Binding Resposta}"
+                               FontSize="12"
+                               FontFamily="Consolas"
+                               TextColor="#00BFFF"/>
+                    </Frame>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Info UUIDs -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#E3F2FD, Dark=#0D47A1}"
+                   CornerRadius="8"
+                   Padding="12">
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="ℹ️ UUIDs do ESP32 BLE"
+                           FontSize="12"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#1565C0, Dark=#FFFFFF}"/>
+                    <Label Text="Service: 4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+                           FontSize="10"
+                           TextColor="{AppThemeBinding Light=#1565C0, Dark=#BBDEFB}"/>
+                    <Label Text="TX: beb5483e-36e1-4688-b7f5-ea07361b26a8"
+                           FontSize="10"
+                           TextColor="{AppThemeBinding Light=#1565C0, Dark=#BBDEFB}"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:ESP32Controller.ViewModels"
+             x:Class="ESP32Controller.Views.WiFiControlPage"
+             x:DataType="vm:WiFiControlViewModel"
+             Title="Controle WiFi"
+             BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1A1A2E}">
+    
+    <ScrollView>
+        <VerticalStackLayout Spacing="16" Padding="16">
+            
+            <!-- Status de Conexão -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="16"
+                   Padding="20"
+                   HasShadow="True">
+                <Grid ColumnDefinitions="*,Auto">
+                    <VerticalStackLayout>
+                        <Label Text="📡 Conexão WiFi"
+                               FontSize="20"
+                               FontAttributes="Bold"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Label Text="{Binding StatusTexto}"
+                               FontSize="14"
+                               TextColor="{Binding StatusCor}"/>
+                    </VerticalStackLayout>
+                    <ActivityIndicator Grid.Column="1"
+                                       IsRunning="{Binding IsBusy}"
+                                       Color="#4CAF50"/>
+                </Grid>
+            </Frame>
+            
+            <!-- Configuração de IP -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="🌐 Configuração de Rede"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Grid ColumnDefinitions="*,100" ColumnSpacing="12">
+                        <Entry Placeholder="Endereço IP"
+                               Text="{Binding EnderecoIP}"
+                               Keyboard="Numeric"
+                               BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Entry Grid.Column="1"
+                               Placeholder="Porta"
+                               Text="{Binding Porta}"
+                               Keyboard="Numeric"
+                               BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    </Grid>
+                    
+                    <Button Text="🔗 Conectar"
+                            Command="{Binding ConectarCommand}"
+                            BackgroundColor="#4CAF50"
+                            TextColor="White"
+                            CornerRadius="8"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Controles de LED -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="💡 Controle de LED"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                        <Button Text="ON"
+                                Command="{Binding LigarLedCommand}"
+                                BackgroundColor="#4CAF50"
+                                TextColor="White"
+                                CornerRadius="8"/>
+                        <Button Grid.Column="1"
+                                Text="OFF"
+                                Command="{Binding DesligarLedCommand}"
+                                BackgroundColor="#F44336"
+                                TextColor="White"
+                                CornerRadius="8"/>
+                        <Button Grid.Column="2"
+                                Text="Toggle"
+                                Command="{Binding ToggleLedCommand}"
+                                BackgroundColor="#FF9800"
+                                TextColor="White"
+                                CornerRadius="8"/>
+                    </Grid>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Controle PWM -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="🎚️ Controle PWM"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Grid ColumnDefinitions="80,*" ColumnSpacing="12" RowDefinitions="Auto,Auto">
+                        <Label Text="Pino:"
+                               VerticalOptions="Center"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Picker Grid.Column="1"
+                                ItemsSource="{Binding PinosDisponiveis}"
+                                SelectedItem="{Binding PinoPWM}"
+                                BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                                TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        
+                        <Label Grid.Row="1"
+                               Text="{Binding ValorPWM, StringFormat='PWM: {0}'}"
+                               VerticalOptions="Center"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Slider Grid.Row="1" Grid.Column="1"
+                                Minimum="0"
+                                Maximum="255"
+                                Value="{Binding ValorPWM}"
+                                ThumbColor="#4CAF50"
+                                MinimumTrackColor="#4CAF50"/>
+                    </Grid>
+                    
+                    <Button Text="📤 Enviar PWM"
+                            Command="{Binding EnviarPWMCommand}"
+                            BackgroundColor="#9C27B0"
+                            TextColor="White"
+                            CornerRadius="8"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Controle GPIO -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="⚡ Controle GPIO"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <HorizontalStackLayout Spacing="12">
+                        <Label Text="Pino:"
+                               VerticalOptions="Center"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Picker ItemsSource="{Binding PinosDisponiveis}"
+                                SelectedItem="{Binding PinoGPIO}"
+                                WidthRequest="100"
+                                BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                                TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    </HorizontalStackLayout>
+                    
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                        <Button Text="HIGH"
+                                Command="{Binding GPIOHighCommand}"
+                                BackgroundColor="#4CAF50"
+                                TextColor="White"
+                                CornerRadius="8"/>
+                        <Button Grid.Column="1"
+                                Text="LOW"
+                                Command="{Binding GPIOLowCommand}"
+                                BackgroundColor="#F44336"
+                                TextColor="White"
+                                CornerRadius="8"/>
+                    </Grid>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Comando Customizado -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="🛠️ Comando Customizado"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Grid ColumnDefinitions="80,*" ColumnSpacing="12">
+                        <Picker ItemsSource="{Binding Metodos}"
+                                SelectedItem="{Binding MetodoSelecionado}"
+                                BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                                TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Entry Grid.Column="1"
+                               Placeholder="Endpoint (ex: led/on)"
+                               Text="{Binding EndpointCustom}"
+                               BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    </Grid>
+                    
+                    <Entry Placeholder="Payload JSON (opcional)"
+                           Text="{Binding PayloadCustom}"
+                           BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    
+                    <Button Text="📤 Enviar Comando"
+                            Command="{Binding EnviarComandoCommand}"
+                            BackgroundColor="#2196F3"
+                            TextColor="White"
+                            CornerRadius="8"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Resposta -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="8">
+                    <HorizontalStackLayout>
+                        <Label Text="📨 Resposta"
+                               FontSize="16"
+                               FontAttributes="Bold"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Button Text="📊 Status"
+                                Command="{Binding ObterStatusCommand}"
+                                BackgroundColor="Transparent"
+                                TextColor="#4CAF50"
+                                FontSize="12"
+                                Margin="20,0,0,0"/>
+                    </HorizontalStackLayout>
+                    
+                    <Frame BackgroundColor="{AppThemeBinding Light=#1E1E1E, Dark=#0F3460}"
+                           CornerRadius="8"
+                           Padding="12"
+                           MinimumHeightRequest="80">
+                        <Label Text="{Binding Resposta}"
+                               FontSize="12"
+                               FontFamily="Consolas"
+                               TextColor="#00FF00"/>
+                    </Frame>
+                </VerticalStackLayout>
+            </Frame>
+            
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

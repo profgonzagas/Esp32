@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:ESP32Controller.ViewModels"
+             x:Class="ESP32Controller.Views.DashboardPage"
+             x:DataType="vm:DashboardViewModel"
+             Title="ESP32 Controller"
+             BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1A1A2E}">
+    
+    <ScrollView>
+        <VerticalStackLayout Spacing="16" Padding="16">
+            
+            <!-- Header com Status -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="16"
+                   Padding="20"
+                   HasShadow="True">
+                <Grid ColumnDefinitions="*,Auto">
+                    <VerticalStackLayout>
+                        <Label Text="🔌 ESP32 Controller"
+                               FontSize="24"
+                               FontAttributes="Bold"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Label Text="{Binding Dispositivo.EnderecoIP, StringFormat='IP: {0}'}"
+                               FontSize="14"
+                               TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                    </VerticalStackLayout>
+                    
+                    <VerticalStackLayout Grid.Column="1" HorizontalOptions="End">
+                        <HorizontalStackLayout Spacing="8">
+                            <Frame BackgroundColor="{Binding CorStatusWiFi}"
+                                   CornerRadius="12"
+                                   Padding="8,4"
+                                   HasShadow="False">
+                                <Label Text="WiFi" FontSize="12" TextColor="White"/>
+                            </Frame>
+                            <Frame BackgroundColor="{Binding CorStatusBLE}"
+                                   CornerRadius="12"
+                                   Padding="8,4"
+                                   HasShadow="False">
+                                <Label Text="BLE" FontSize="12" TextColor="White"/>
+                            </Frame>
+                        </HorizontalStackLayout>
+                        <Label Text="{Binding StatusConexao}"
+                               FontSize="12"
+                               HorizontalOptions="End"
+                               TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"
+                               Margin="0,4,0,0"/>
+                    </VerticalStackLayout>
+                </Grid>
+            </Frame>
+            
+            <!-- Botão de Conexão -->
+            <Button Text="🔄 Testar Conexão"
+                    Command="{Binding TestarConexaoCommand}"
+                    BackgroundColor="#4CAF50"
+                    TextColor="White"
+                    FontSize="16"
+                    FontAttributes="Bold"
+                    CornerRadius="12"
+                    HeightRequest="50"
+                    IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}"/>
+            
+            <!-- Status Message -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#E3F2FD, Dark=#0D47A1}"
+                   CornerRadius="8"
+                   Padding="12"
+                   IsVisible="{Binding StatusMensagem, Converter={StaticResource StringToBoolConverter}}">
+                <Label Text="{Binding StatusMensagem}"
+                       FontSize="14"
+                       TextColor="{AppThemeBinding Light=#1565C0, Dark=#FFFFFF}"
+                       HorizontalTextAlignment="Center"/>
+            </Frame>
+            
+            <!-- Comandos Rápidos -->
+            <Label Text="⚡ Comandos Rápidos"
+                   FontSize="18"
+                   FontAttributes="Bold"
+                   TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"
+                   Margin="0,8,0,0"/>
+            
+            <FlexLayout Wrap="Wrap"
+                        JustifyContent="SpaceEvenly"
+                        AlignItems="Center"
+                        BindableLayout.ItemsSource="{Binding Comandos}">
+                <BindableLayout.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                        <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                               CornerRadius="12"
+                               Padding="16"
+                               Margin="4"
+                               WidthRequest="100"
+                               HeightRequest="100"
+                               HasShadow="True">
+                            <Frame.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding Source={RelativeSource AncestorType={x:Type vm:DashboardViewModel}}, Path=ExecutarComandoCommand}"
+                                                      CommandParameter="{Binding}"/>
+                            </Frame.GestureRecognizers>
+                            <VerticalStackLayout VerticalOptions="Center"
+                                                 HorizontalOptions="Center">
+                                <Label Text="💡"
+                                       FontSize="32"
+                                       HorizontalOptions="Center"/>
+                                <Label Text="Comando"
+                                       FontSize="12"
+                                       HorizontalOptions="Center"
+                                       TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                            </VerticalStackLayout>
+                        </Frame>
+                    </DataTemplate>
+                </BindableLayout.ItemTemplate>
+            </FlexLayout>
+            
+            <!-- Grid de Botões Principais -->
+            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="12">
+                <Frame Grid.Column="0" Grid.Row="0"
+                       BackgroundColor="#FFD700"
+                       CornerRadius="12"
+                       Padding="16"
+                       HasShadow="True">
+                    <Frame.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding ExecutarComandoCommand}"/>
+                    </Frame.GestureRecognizers>
+                    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center">
+                        <Label Text="💡" FontSize="40" HorizontalOptions="Center"/>
+                        <Label Text="LED Toggle" FontSize="14" FontAttributes="Bold" 
+                               HorizontalOptions="Center" TextColor="#333333"/>
+                    </VerticalStackLayout>
+                </Frame>
+                
+                <Frame Grid.Column="1" Grid.Row="0"
+                       BackgroundColor="#4CAF50"
+                       CornerRadius="12"
+                       Padding="16"
+                       HasShadow="True">
+                    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center">
+                        <Label Text="🔌" FontSize="40" HorizontalOptions="Center"/>
+                        <Label Text="Relé 1" FontSize="14" FontAttributes="Bold" 
+                               HorizontalOptions="Center" TextColor="White"/>
+                    </VerticalStackLayout>
+                </Frame>
+                
+                <Frame Grid.Column="0" Grid.Row="1"
+                       BackgroundColor="#2196F3"
+                       CornerRadius="12"
+                       Padding="16"
+                       HasShadow="True">
+                    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center">
+                        <Label Text="🔌" FontSize="40" HorizontalOptions="Center"/>
+                        <Label Text="Relé 2" FontSize="14" FontAttributes="Bold" 
+                               HorizontalOptions="Center" TextColor="White"/>
+                    </VerticalStackLayout>
+                </Frame>
+                
+                <Frame Grid.Column="1" Grid.Row="1"
+                       BackgroundColor="#9C27B0"
+                       CornerRadius="12"
+                       Padding="16"
+                       HasShadow="True">
+                    <Frame.GestureRecognizers>
+                        <TapGestureRecognizer Command="{Binding AtualizarSensoresCommand}"/>
+                    </Frame.GestureRecognizers>
+                    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center">
+                        <Label Text="📊" FontSize="40" HorizontalOptions="Center"/>
+                        <Label Text="Sensores" FontSize="14" FontAttributes="Bold" 
+                               HorizontalOptions="Center" TextColor="White"/>
+                    </VerticalStackLayout>
+                </Frame>
+            </Grid>
+            
+            <!-- Última Resposta -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True"
+                   IsVisible="{Binding UltimaResposta, Converter={StaticResource StringToBoolConverter}}">
+                <VerticalStackLayout>
+                    <Label Text="📨 Última Resposta"
+                           FontSize="14"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    <Frame BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                           CornerRadius="8"
+                           Padding="12"
+                           Margin="0,8,0,0">
+                        <Label Text="{Binding UltimaResposta}"
+                               FontSize="12"
+                               FontFamily="Consolas"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#00FF00}"/>
+                    </Frame>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Loading Indicator -->
+            <ActivityIndicator IsRunning="{Binding IsBusy}"
+                               IsVisible="{Binding IsBusy}"
+                               Color="#4CAF50"
+                               HeightRequest="40"/>
+            
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>
