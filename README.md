@@ -1,4 +1,4 @@
-# 🔌 ESP32 Controller
+# 🔌 NecroSENSE
 
 Aplicativo .NET MAUI para controlar ESP32 via **WiFi** (HTTP) ou **Bluetooth** (BLE).
 

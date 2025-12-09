@@ -4,7 +4,7 @@
              xmlns:vm="clr-namespace:ESP32Controller.ViewModels"
              x:Class="ESP32Controller.Views.DashboardPage"
              x:DataType="vm:DashboardViewModel"
-             Title="ESP32 Controller"
+             Title="NecroSENSE/PCDF"
              BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1A1A2E}">
     
     <ScrollView>
@@ -15,18 +15,22 @@
                    CornerRadius="16"
                    Padding="20"
                    HasShadow="True">
-                <Grid ColumnDefinitions="*,Auto">
-                    <VerticalStackLayout>
-                        <Label Text="🔌 ESP32 Controller"
-                               FontSize="24"
-                               FontAttributes="Bold"
-                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                    <!-- Brasão PCDF -->
+                    <Image Source="brasao_pcdf.png"
+                           Aspect="AspectFit"
+                           WidthRequest="80"
+                           HeightRequest="96"
+                           VerticalOptions="Center"
+                           Margin="0,0,16,0"/>
+                    
+                    <VerticalStackLayout Grid.Column="1" VerticalOptions="Center">
                         <Label Text="{Binding Dispositivo.EnderecoIP, StringFormat='IP: {0}'}"
                                FontSize="14"
                                TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
                     </VerticalStackLayout>
                     
-                    <VerticalStackLayout Grid.Column="1" HorizontalOptions="End">
+                    <VerticalStackLayout Grid.Column="2" HorizontalOptions="End">
                         <HorizontalStackLayout Spacing="8">
                             <Frame BackgroundColor="{Binding CorStatusWiFi}"
                                    CornerRadius="12"

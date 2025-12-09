@@ -98,7 +98,7 @@ public class DashboardViewModel : BaseViewModel
         _bleService = bleService;
         _configService = configService;
         
-        Titulo = "ESP32 Controller";
+        Titulo = "NecroSENSE/PCDF";
         
         TestarConexaoCommand = new Command(async () => await TestarConexaoAsync());
         AtualizarSensoresCommand = new Command(async () => await AtualizarSensoresAsync());

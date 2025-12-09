@@ -1,8 +1,8 @@
 /*
- * ESP32 Controller - Código Arduino
+ * NecroSENSE - Código Arduino
  * 
  * Este código cria um servidor web no ESP32 para receber comandos
- * do aplicativo ESP32Controller (MAUI)
+ * do aplicativo NecroSENSE (MAUI)
  * 
  * Endpoints disponíveis:
  * - GET /status         - Retorna status do dispositivo
@@ -129,7 +129,7 @@ void configurarRotas() {
 
 // ==================== HANDLERS ====================
 void handleRoot() {
-    String html = "<!DOCTYPE html><html><head><title>ESP32 Controller</title>";
+    String html = "<!DOCTYPE html><html><head><title>NecroSENSE</title>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
     html += "<style>body{font-family:Arial;background:#1A1A2E;color:#fff;padding:20px;}";
     html += "h1{color:#4CAF50;}.btn{background:#4CAF50;color:#fff;padding:15px 30px;";
@@ -137,7 +137,7 @@ void handleRoot() {
     html += ".btn:hover{background:#45a049;}.btn-off{background:#F44336;}";
     html += ".btn-off:hover{background:#d32f2f;}.status{padding:10px;background:#16213E;";
     html += "border-radius:8px;margin:10px 0;}</style></head><body>";
-    html += "<h1>🔌 ESP32 Controller</h1>";
+    html += "<h1>🔌 NecroSENSE</h1>";
     html += "<div class='status'><strong>IP:</strong> " + WiFi.localIP().toString() + "</div>";
     html += "<div class='status'><strong>LED:</strong> " + String(ledState ? "Ligado" : "Desligado") + "</div>";
     html += "<div class='status'><strong>Relé 1:</strong> " + String(rele1State ? "Ligado" : "Desligado") + "</div>";

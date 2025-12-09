@@ -1,8 +1,8 @@
 /*
- * ESP32 Controller - Código BLE (Bluetooth Low Energy)
+ * NecroSENSE - Código BLE (Bluetooth Low Energy)
  * 
  * Este código cria um servidor BLE no ESP32 para receber comandos
- * do aplicativo ESP32Controller (MAUI) via Bluetooth
+ * do aplicativo NecroSENSE (MAUI) via Bluetooth
  * 
  * Comandos disponíveis (enviar via característica TX):
  * - LED_ON       - Liga o LED

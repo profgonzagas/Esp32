@@ -152,7 +152,7 @@
                            FontSize="14"
                            FontAttributes="Bold"
                            TextColor="{AppThemeBinding Light=#2E7D32, Dark=#A5D6A7}"/>
-                    <Label Text="ESP32 Controller v1.0"
+                    <Label Text="NecroSENSE v1.0"
                            FontSize="12"
                            TextColor="{AppThemeBinding Light=#2E7D32, Dark=#A5D6A7}"/>
                     <Label Text="Desenvolvido com .NET MAUI"
