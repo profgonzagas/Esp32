@@ -1,4 +1,7 @@
 using ESP32Controller.Models;
+using Plugin.BLE;
+using Plugin.BLE.Abstractions.Contracts;
+using Plugin.BLE.Abstractions.EventArgs;
 using System.Text;
 
 namespace ESP32Controller.Services;
@@ -8,6 +11,12 @@ public class ESP32BleService
     private bool _isScanning;
     private bool _isConnected;
     private string _deviceId = "";
+    private IDevice? _connectedDevice;
+    private IService? _service;
+    private ICharacteristic? _txCharacteristic;
+    private ICharacteristic? _rxCharacteristic;
+    private IBluetoothLE? _ble;
+    private IAdapter? _adapter;
     
     public bool IsScanning => _isScanning;
     public bool IsConectado => _isConnected;
@@ -23,6 +32,42 @@ public class ESP32BleService
     
     public ESP32BleService()
     {
+        try
+        {
+            _ble = CrossBluetoothLE.Current;
+            _adapter = CrossBluetoothLE.Current.Adapter;
+            
+            if (_adapter != null)
+            {
+                // Subscrever eventos do adaptador
+                _adapter.DeviceDiscovered += OnDeviceDiscovered;
+                _adapter.DeviceConnected += OnDeviceConnected;
+                _adapter.DeviceDisconnected += OnDeviceDisconnected;
+            }
+            
+            System.Diagnostics.Debug.WriteLine("[BLE] Serviço BLE inicializado");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[BLE] Erro ao inicializar: {ex.Message}");
+        }
+    }
+    
+    private void OnDeviceDiscovered(object? sender, DeviceEventArgs e)
+    {
+        System.Diagnostics.Debug.WriteLine($"[BLE] Dispositivo encontrado: {e.Device.Name} ({e.Device.Id})");
+    }
+    
+    private void OnDeviceConnected(object? sender, DeviceEventArgs e)
+    {
+        System.Diagnostics.Debug.WriteLine($"[BLE] Conectado em: {e.Device.Name}");
+    }
+    
+    private void OnDeviceDisconnected(object? sender, DeviceEventArgs e)
+    {
+        System.Diagnostics.Debug.WriteLine($"[BLE] Desconectado de: {e.Device.Name}");
+        _isConnected = false;
+        OnStatusConexaoChanged?.Invoke(this, false);
     }
     
     public async Task<List<DispositivoBLE>> ScanearDispositivosAsync(int timeoutSeconds = 10)
@@ -32,18 +77,50 @@ public class ESP32BleService
         
         try
         {
-            // Simulação - Em produção usar Plugin.BLE
-            await Task.Delay(2000);
+            if (_ble == null || _adapter == null)
+            {
+                System.Diagnostics.Debug.WriteLine("[BLE] BLE ou Adapter não disponível");
+                OnDispositivosEncontrados?.Invoke(this, dispositivos);
+                return dispositivos;
+            }
             
-            // Dispositivos de exemplo
-            dispositivos.Add(new DispositivoBLE 
-            { 
-                Nome = "ESP32_BLE_001", 
-                Id = "AA:BB:CC:DD:EE:FF",
-                Rssi = -65
-            });
+            System.Diagnostics.Debug.WriteLine($"[BLE] Iniciando scan por {timeoutSeconds}s");
+            
+            // Verificar estado do Bluetooth
+            if (!_ble.IsOn)
+            {
+                System.Diagnostics.Debug.WriteLine("[BLE] Bluetooth está desligado");
+                OnDispositivosEncontrados?.Invoke(this, dispositivos);
+                return dispositivos;
+            }
+            
+            // Escanear por dispositivos
+            await _adapter.StartScanningForDevicesAsync();
+            
+            // Aguardar timeout
+            await Task.Delay(timeoutSeconds * 1000);
+            
+            await _adapter.StopScanningForDevicesAsync();
+            
+            // Converter para modelo da aplicação
+            foreach (var device in _adapter.DiscoveredDevices)
+            {
+                dispositivos.Add(new DispositivoBLE
+                {
+                    Nome = device.Name ?? "Desconhecido",
+                    Id = device.Id.ToString(),
+                    Rssi = device.Rssi
+                });
+                
+                System.Diagnostics.Debug.WriteLine($"[BLE] Encontrado: {device.Name} ({device.Id}) - RSSI: {device.Rssi}");
+            }
             
             OnDispositivosEncontrados?.Invoke(this, dispositivos);
+            System.Diagnostics.Debug.WriteLine($"[BLE] Scan concluído - {dispositivos.Count} dispositivos encontrados");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[BLE] Erro ao escanear: {ex.Message}");
         }
         finally
         {
@@ -57,10 +134,72 @@ public class ESP32BleService
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine($"[BLE] Tentando conectar em: {deviceId}");
+            
+            if (_ble == null || _adapter == null)
+            {
+                System.Diagnostics.Debug.WriteLine("[BLE] BLE ou Adapter não disponível");
+                return false;
+            }
+            
+            if (!_ble.IsOn)
+            {
+                System.Diagnostics.Debug.WriteLine("[BLE] Bluetooth está desligado");
+                return false;
+            }
+            
+            // Encontrar dispositivo
+            Guid deviceGuid;
+            if (!Guid.TryParse(deviceId, out deviceGuid))
+            {
+                System.Diagnostics.Debug.WriteLine($"[BLE] ID inválido: {deviceId}");
+                return false;
+            }
+            
+            var device = _adapter.DiscoveredDevices.FirstOrDefault(d => d.Id == deviceGuid);
+            if (device == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[BLE] Dispositivo não encontrado: {deviceId}");
+                return false;
+            }
+            
+            // Conectar
+            await _adapter.ConnectToDeviceAsync(device);
+            _connectedDevice = device;
             _deviceId = deviceId;
             
-            // Simulação de conexão
-            await Task.Delay(1000);
+            System.Diagnostics.Debug.WriteLine($"[BLE] Conectado em: {device.Name}");
+            
+            // Obter serviço
+            var services = await device.GetServicesAsync();
+            _service = services.FirstOrDefault(s => s.Id == ServiceUUID);
+            
+            if (_service == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[BLE] Serviço não encontrado: {ServiceUUID}");
+                await _adapter.DisconnectDeviceAsync(device);
+                return false;
+            }
+            
+            // Obter características
+            var characteristics = await _service.GetCharacteristicsAsync();
+            _txCharacteristic = characteristics.FirstOrDefault(c => c.Id == CharacteristicTxUUID);
+            _rxCharacteristic = characteristics.FirstOrDefault(c => c.Id == CharacteristicRxUUID);
+            
+            if (_txCharacteristic == null || _rxCharacteristic == null)
+            {
+                System.Diagnostics.Debug.WriteLine("[BLE] Características não encontradas");
+                await _adapter.DisconnectDeviceAsync(device);
+                return false;
+            }
+            
+            // Subscrever notificações
+            if (_rxCharacteristic.CanUpdate)
+            {
+                await _rxCharacteristic.StartUpdatesAsync();
+                _rxCharacteristic.ValueUpdated += OnCharacteristicValueUpdated;
+                System.Diagnostics.Debug.WriteLine("[BLE] Subscrições de notificação ativadas");
+            }
             
             _isConnected = true;
             OnStatusConexaoChanged?.Invoke(this, true);
@@ -69,10 +208,27 @@ public class ESP32BleService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Erro BLE: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] Erro ao conectar: {ex.Message}");
             _isConnected = false;
             OnStatusConexaoChanged?.Invoke(this, false);
             return false;
+        }
+    }
+    
+    private void OnCharacteristicValueUpdated(object? sender, CharacteristicUpdatedEventArgs e)
+    {
+        try
+        {
+            if (e.Characteristic.Value != null)
+            {
+                var mensagem = Encoding.UTF8.GetString(e.Characteristic.Value);
+                System.Diagnostics.Debug.WriteLine($"[BLE] Dados recebidos: {mensagem}");
+                OnMensagemRecebida?.Invoke(this, mensagem);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[BLE] Erro ao processar notificação: {ex.Message}");
         }
     }
     
@@ -80,36 +236,50 @@ public class ESP32BleService
     {
         try
         {
-            // Desconectar BLE
-            await Task.Delay(100);
+            if (_connectedDevice != null)
+            {
+                if (_rxCharacteristic != null && _rxCharacteristic.CanUpdate)
+                {
+                    await _rxCharacteristic.StopUpdatesAsync();
+                    _rxCharacteristic.ValueUpdated -= OnCharacteristicValueUpdated;
+                }
+                
+                await _adapter.DisconnectDeviceAsync(_connectedDevice);
+                System.Diagnostics.Debug.WriteLine("[BLE] Desconectado");
+            }
             
             _isConnected = false;
             _deviceId = "";
+            _connectedDevice = null;
+            _service = null;
+            _txCharacteristic = null;
+            _rxCharacteristic = null;
             OnStatusConexaoChanged?.Invoke(this, false);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Erro ao desconectar BLE: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] Erro ao desconectar: {ex.Message}");
         }
     }
     
     public async Task<bool> EnviarDadosAsync(string dados)
     {
-        if (!_isConnected) return false;
+        if (!_isConnected || _txCharacteristic == null) 
+            return false;
         
         try
         {
             var bytes = Encoding.UTF8.GetBytes(dados);
             
-            // Simulação de envio
-            await Task.Delay(100);
+            // Enviar dados via BLE
+            await _txCharacteristic.WriteAsync(bytes);
             
-            System.Diagnostics.Debug.WriteLine($"BLE TX: {dados}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] TX: {dados}");
             return true;
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Erro ao enviar BLE: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] Erro ao enviar: {ex.Message}");
             return false;
         }
     }
@@ -145,15 +315,5 @@ public class DispositivoBLE
         }
     }
     
-    public string IconeSinal
-    {
-        get
-        {
-            if (Rssi > -50) return "📶";
-            if (Rssi > -60) return "📶";
-            if (Rssi > -70) return "📶";
-            if (Rssi > -80) return "📶";
-            return "📶";
-        }
-    }
+    public string IconeSinal => "📶";
 }

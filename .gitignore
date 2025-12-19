@@ -32,3 +32,9 @@ ehthumbs.db
 *.ipa
 *.dSYM.zip
 *.dSYM
+# Arquivos de configuração com credenciais
+include/secrets.h
+secrets.h
+appsettings.*.json
+*.key
+*.pem

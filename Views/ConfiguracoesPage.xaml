@@ -55,7 +55,7 @@
                             <Label Text="Endereço IP"
                                    FontSize="12"
                                    TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
-                            <Entry Placeholder="192.168.1.100"
+                            <Entry Placeholder="192.168.1.128"
                                    Text="{Binding EnderecoIP}"
                                    Keyboard="Numeric"
                                    BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"

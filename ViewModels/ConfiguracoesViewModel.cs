@@ -9,10 +9,10 @@ public class ConfiguracoesViewModel : BaseViewModel
     private readonly ConfiguracaoService _configService;
     private readonly ESP32HttpService _httpService;
     
-    private string _nomeDispositivo = "ESP32";
-    private string _enderecoIP = "192.168.1.100";
+    private string _nomeDispositivo = "NecroSENSE ESP32";
+    private string _enderecoIP = "192.168.1.128";
     private int _porta = 80;
-    private string _enderecoMAC = "";
+    private string _enderecoMAC = "00:4B:12:53:4C:18";
     private bool _temaEscuro = true;
     
     public string NomeDispositivo
