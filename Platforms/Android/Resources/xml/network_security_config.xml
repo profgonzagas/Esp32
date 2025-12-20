@@ -1,25 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Bloquear cleartext por padrão (força HTTPS) -->
-    <base-config cleartextTrafficPermitted="false">
+    <!-- Permitir HTTP/Cleartext para TODOS os domínios/IPs -->
+    <!-- Necessário para comunicação com ESP32 via IP local -->
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-    
-    <!-- Permitir HTTP/Cleartext para localhost e domínios locais -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">127.0.0.1</domain>
-    </domain-config>
-    
-    <!-- Permitir HTTP/Cleartext para IP específico 192.168.1.128 -->
-    <ip-config cleartextTrafficPermitted="true">
-        <addresses>
-            <address>192.168.1.128</address>
-            <address>192.168.0.0/16</address>
-            <address>10.0.0.0/8</address>
-            <address>172.16.0.0/12</address>
-        </addresses>
-    </ip-config>
 </network-security-config>

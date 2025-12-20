@@ -9,7 +9,7 @@ public class WiFiControlViewModel : BaseViewModel
     private readonly ESP32HttpService _httpService;
     private readonly ConfiguracaoService _configService;
     
-    private string _enderecoIP = "192.168.1.100";
+    private string _enderecoIP = "192.168.1.128";
     private int _porta = 80;
     private string _endpointCustom = "";
     private string _payloadCustom = "";

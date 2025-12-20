@@ -223,6 +223,27 @@ public class ESP32HttpService
     public Task<string> ObterUmidadeAsync() => EnviarComandoAsync("umidade");
     public Task<string> ObterStatusAsync() => EnviarComandoAsync("status");
     
+    // Comandos dos sensores
+    public async Task<DadosSensores?> ObterDadosSensoresAsync()
+    {
+        try
+        {
+            var json = await EnviarComandoAsync("sensores");
+            if (string.IsNullOrEmpty(json)) return null;
+            
+            var dados = JsonSerializer.Deserialize<DadosSensores>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            return dados;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[WiFi] Erro ao obter sensores: {ex.Message}");
+            return null;
+        }
+    }
+    
     public async Task<string> EnviarPWMAsync(int pino, int valor)
     {
         return await EnviarComandoAsync($"pwm/{pino}/{valor}");
