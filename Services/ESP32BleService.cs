@@ -280,10 +280,11 @@ public class ESP32BleService
         {
             if (_connectedDevice != null)
             {
-                if (_rxCharacteristic != null && _rxCharacteristic.CanUpdate)
+                // Parar notificações da característica TX (a que tem notify)
+                if (_txCharacteristic != null && _txCharacteristic.CanUpdate)
                 {
-                    await _rxCharacteristic.StopUpdatesAsync();
-                    _rxCharacteristic.ValueUpdated -= OnCharacteristicValueUpdated;
+                    await _txCharacteristic.StopUpdatesAsync();
+                    _txCharacteristic.ValueUpdated -= OnCharacteristicValueUpdated;
                 }
                 
                 await _adapter.DisconnectDeviceAsync(_connectedDevice);
@@ -306,17 +307,17 @@ public class ESP32BleService
     
     public async Task<bool> EnviarDadosAsync(string dados)
     {
-        if (!_isConnected || _txCharacteristic == null) 
+        if (!_isConnected || _rxCharacteristic == null) 
             return false;
         
         try
         {
             var bytes = Encoding.UTF8.GetBytes(dados);
             
-            // Enviar dados via BLE
-            await _txCharacteristic.WriteAsync(bytes);
+            // Enviar dados via BLE (escrever na característica RX do ESP32)
+            await _rxCharacteristic.WriteAsync(bytes);
             
-            System.Diagnostics.Debug.WriteLine($"[BLE] TX: {dados}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] TX→RX: {dados}");
             return true;
         }
         catch (Exception ex)
@@ -332,11 +333,16 @@ public class ESP32BleService
     }
     
     // Comandos comuns
-    public Task<bool> LigarLedAsync() => EnviarComandoAsync("LED_ON");
-    public Task<bool> DesligarLedAsync() => EnviarComandoAsync("LED_OFF");
-    public Task<bool> ToggleLedAsync() => EnviarComandoAsync("LED_TOGGLE");
-    public Task<bool> SolicitarStatusAsync() => EnviarComandoAsync("GET_STATUS");
-    public Task<bool> SolicitarSensoresAsync() => EnviarComandoAsync("GET_SENSORS");
+    public Task<bool> LigarLedAsync() => EnviarComandoAsync("led:on");
+    public Task<bool> DesligarLedAsync() => EnviarComandoAsync("led:off");
+    public Task<bool> ToggleLedAsync() => EnviarComandoAsync("led:toggle");
+    public Task<bool> SolicitarStatusAsync() => EnviarComandoAsync("status");
+    public Task<bool> SolicitarSensoresAsync() => EnviarComandoAsync("sensores");
+    public Task<bool> SolicitarTemperaturaAsync() => EnviarComandoAsync("temperatura");
+    public Task<bool> SolicitarUmidadeAsync() => EnviarComandoAsync("umidade");
+    public Task<bool> SolicitarGasAsync() => EnviarComandoAsync("gas");
+    public Task<bool> SolicitarChamaAsync() => EnviarComandoAsync("chama");
+    public Task<bool> SolicitarSomAsync() => EnviarComandoAsync("som");
 }
 
 public class DispositivoBLE

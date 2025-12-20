@@ -117,59 +117,53 @@
             
             <!-- Grid de Botões Principais -->
             <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="12">
-                <Frame Grid.Column="0" Grid.Row="0"
-                       BackgroundColor="#FFD700"
-                       CornerRadius="12"
-                       Padding="16"
-                       HasShadow="True">
-                    <Frame.GestureRecognizers>
-                        <TapGestureRecognizer Command="{Binding ExecutarComandoCommand}"/>
-                    </Frame.GestureRecognizers>
-                    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center">
-                        <Label Text="💡" FontSize="40" HorizontalOptions="Center"/>
-                        <Label Text="LED Toggle" FontSize="14" FontAttributes="Bold" 
-                               HorizontalOptions="Center" TextColor="#333333"/>
-                    </VerticalStackLayout>
-                </Frame>
+                <!-- LED Toggle -->
+                <Button Grid.Column="0" Grid.Row="0"
+                        Text="💡 LED Toggle&#10;GPIO 13"
+                        Command="{Binding ToggleLedCommand}"
+                        BackgroundColor="#FFD700"
+                        TextColor="#333333"
+                        FontSize="13"
+                        FontAttributes="Bold"
+                        CornerRadius="12"
+                        Padding="16"
+                        HeightRequest="120"/>
                 
-                <Frame Grid.Column="1" Grid.Row="0"
-                       BackgroundColor="#4CAF50"
-                       CornerRadius="12"
-                       Padding="16"
-                       HasShadow="True">
-                    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center">
-                        <Label Text="🔌" FontSize="40" HorizontalOptions="Center"/>
-                        <Label Text="Relé 1" FontSize="14" FontAttributes="Bold" 
-                               HorizontalOptions="Center" TextColor="White"/>
-                    </VerticalStackLayout>
-                </Frame>
+                <!-- Relé 1 Toggle -->
+                <Button Grid.Column="1" Grid.Row="0"
+                        Text="🔌 Relé 1&#10;GPIO 26"
+                        Command="{Binding ToggleRele1Command}"
+                        BackgroundColor="#4CAF50"
+                        TextColor="White"
+                        FontSize="13"
+                        FontAttributes="Bold"
+                        CornerRadius="12"
+                        Padding="16"
+                        HeightRequest="120"/>
                 
-                <Frame Grid.Column="0" Grid.Row="1"
-                       BackgroundColor="#2196F3"
-                       CornerRadius="12"
-                       Padding="16"
-                       HasShadow="True">
-                    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center">
-                        <Label Text="🔌" FontSize="40" HorizontalOptions="Center"/>
-                        <Label Text="Relé 2" FontSize="14" FontAttributes="Bold" 
-                               HorizontalOptions="Center" TextColor="White"/>
-                    </VerticalStackLayout>
-                </Frame>
+                <!-- Relé 2 Toggle -->
+                <Button Grid.Column="0" Grid.Row="1"
+                        Text="🔌 Relé 2&#10;GPIO 27"
+                        Command="{Binding ToggleRele2Command}"
+                        BackgroundColor="#2196F3"
+                        TextColor="White"
+                        FontSize="13"
+                        FontAttributes="Bold"
+                        CornerRadius="12"
+                        Padding="16"
+                        HeightRequest="120"/>
                 
-                <Frame Grid.Column="1" Grid.Row="1"
-                       BackgroundColor="#9C27B0"
-                       CornerRadius="12"
-                       Padding="16"
-                       HasShadow="True">
-                    <Frame.GestureRecognizers>
-                        <TapGestureRecognizer Command="{Binding AtualizarSensoresCommand}"/>
-                    </Frame.GestureRecognizers>
-                    <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center">
-                        <Label Text="📊" FontSize="40" HorizontalOptions="Center"/>
-                        <Label Text="Sensores" FontSize="14" FontAttributes="Bold" 
-                               HorizontalOptions="Center" TextColor="White"/>
-                    </VerticalStackLayout>
-                </Frame>
+                <!-- Atualizar Sensores -->
+                <Button Grid.Column="1" Grid.Row="1"
+                        Text="📊 Sensores&#10;Atualizar"
+                        Command="{Binding AtualizarSensoresCommand}"
+                        BackgroundColor="#9C27B0"
+                        TextColor="White"
+                        FontSize="14"
+                        FontAttributes="Bold"
+                        CornerRadius="12"
+                        Padding="16"
+                        HeightRequest="120"/>
             </Grid>
             
             <!-- Última Resposta -->

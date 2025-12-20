@@ -76,6 +76,7 @@ public class BLEControlViewModel : BaseViewModel
     public ICommand DesligarLedCommand { get; }
     public ICommand ToggleLedCommand { get; }
     public ICommand SolicitarStatusCommand { get; }
+    public ICommand MostrarAjudaBLECommand { get; }
     
     public BLEControlViewModel(ESP32BleService bleService)
     {
@@ -91,6 +92,7 @@ public class BLEControlViewModel : BaseViewModel
         DesligarLedCommand = new Command(async () => await ExecutarAsync(_bleService.DesligarLedAsync()));
         ToggleLedCommand = new Command(async () => await ExecutarAsync(_bleService.ToggleLedAsync()));
         SolicitarStatusCommand = new Command(async () => await ExecutarAsync(_bleService.SolicitarStatusAsync()));
+        MostrarAjudaBLECommand = new Command(() => MostrarAjudaBLEAsync());
         
         _bleService.OnStatusConexaoChanged += (s, c) =>
         {
@@ -232,5 +234,48 @@ public class BLEControlViewModel : BaseViewModel
         {
             IsBusy = false;
         }
+    }
+    
+    private void MostrarAjudaBLEAsync()
+    {
+        var ajuda = """
+            ℹ️ AJUDA - COMANDOS BLE
+            
+            Comandos Disponíveis:
+            
+            🔌 INFORMAÇÕES:
+            • sensores - Ler todos os sensores
+            • temperatura - Temperatura
+            • umidade - Umidade
+            • gas - Concentração de gás MQ-5
+            • chama - Detector de chama
+            • som - Sensor de som KY-037
+            
+            💡 CONTROLE:
+            • led:on - Ligar LED
+            • led:off - Desligar LED
+            • led:toggle - Alternar LED
+            • rele1:on - Ligar Relé 1
+            • rele1:off - Desligar Relé 1
+            • rele2:on - Ligar Relé 2
+            • rele2:off - Desligar Relé 2
+            
+            Exemplos:
+            temperatura
+            led:toggle
+            rele1:on
+            """;
+        
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            if (Application.Current?.Windows.Count > 0)
+            {
+                var window = Application.Current.Windows[0];
+                if (window?.Page != null)
+                {
+                    await window.Page.DisplayAlert("ℹ️ Ajuda BLE", ajuda, "OK");
+                }
+            }
+        });
     }
 }

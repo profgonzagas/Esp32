@@ -27,6 +27,11 @@
             ContentTemplate="{DataTemplate views:BLEControlPage}"/>
         
         <ShellContent
+            Title="Sensores"
+            Icon="dotnet_bot.png"
+            ContentTemplate="{DataTemplate views:SensoresPage}"/>
+        
+        <ShellContent
             Title="Config"
             Icon="settings.png"
             ContentTemplate="{DataTemplate views:ConfiguracoesPage}"/>

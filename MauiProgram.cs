@@ -44,6 +44,7 @@ public static class MauiProgram
 			builder.Services.AddTransient<WiFiControlViewModel>();
 			builder.Services.AddTransient<BLEControlViewModel>();
 			builder.Services.AddTransient<ConfiguracoesViewModel>();
+			builder.Services.AddTransient<SensoresViewModel>();
 			
 			System.Diagnostics.Debug.WriteLine("[MAUI] ViewModels registrados com sucesso");
 			System.Diagnostics.Debug.WriteLine("[MAUI] Registrando Pages...");
@@ -53,6 +54,7 @@ public static class MauiProgram
 			builder.Services.AddTransient<WiFiControlPage>();
 			builder.Services.AddTransient<BLEControlPage>();
 			builder.Services.AddTransient<ConfiguracoesPage>();
+			builder.Services.AddTransient<SensoresPage>();
 			
 			System.Diagnostics.Debug.WriteLine("[MAUI] Pages registradas com sucesso");
 

@@ -64,11 +64,13 @@ public class WiFiControlViewModel : BaseViewModel
             SetProperty(ref _conectado, value);
             OnPropertyChanged(nameof(StatusTexto));
             OnPropertyChanged(nameof(StatusCor));
+            OnPropertyChanged(nameof(BotaoConectarTexto));
         }
     }
     
     public string StatusTexto => Conectado ? "🟢 Conectado" : "🔴 Desconectado";
     public string StatusCor => Conectado ? "#4CAF50" : "#F44336";
+    public string BotaoConectarTexto => Conectado ? "🔌 Desconectar" : "🔗 Conectar";
     
     public int ValorPWM
     {
@@ -100,6 +102,7 @@ public class WiFiControlViewModel : BaseViewModel
     public ICommand GPIOHighCommand { get; }
     public ICommand GPIOLowCommand { get; }
     public ICommand ObterStatusCommand { get; }
+    public ICommand MostrarAjudaCommand { get; }
     
     public WiFiControlViewModel(ESP32HttpService httpService, ConfiguracaoService configService)
     {
@@ -117,6 +120,7 @@ public class WiFiControlViewModel : BaseViewModel
         GPIOHighCommand = new Command(async () => await ExecutarAsync(_httpService.DefinirPinoAsync(PinoGPIO, true)));
         GPIOLowCommand = new Command(async () => await ExecutarAsync(_httpService.DefinirPinoAsync(PinoGPIO, false)));
         ObterStatusCommand = new Command(async () => await ExecutarAsync(_httpService.ObterStatusAsync()));
+        MostrarAjudaCommand = new Command(() => MostrarAjudaAsync());
         
         _httpService.OnStatusConexaoChanged += (s, c) =>
         {
@@ -143,26 +147,38 @@ public class WiFiControlViewModel : BaseViewModel
         if (IsBusy) return;
         
         IsBusy = true;
-        System.Diagnostics.Debug.WriteLine(">>> INICIANDO CONEXÃO");
-        System.Diagnostics.Trace.WriteLine(">>> INICIANDO CONEXÃO");
         
         try
         {
-            var dispositivo = new DispositivoESP32
+            if (Conectado)
             {
-                EnderecoIP = EnderecoIP,
-                Porta = Porta
-            };
-            
-            System.Diagnostics.Debug.WriteLine($">>> IP: {EnderecoIP}, Porta: {Porta}");
-            
-            _httpService.ConfigurarDispositivo(dispositivo);
-            _configService.SalvarDispositivo(dispositivo);
-            
-            System.Diagnostics.Debug.WriteLine(">>> CHAMANDO TestarConexaoAsync");
-            var conectado = await _httpService.TestarConexaoAsync();
-            System.Diagnostics.Debug.WriteLine($">>> RESULTADO: {conectado}");
-            Resposta = conectado ? "✓ Conexão bem sucedida!" : "✗ Falha na conexão. Verifique o IP e se o ESP32 está ligado.";
+                // Desconectar
+                _httpService.Desconectar();
+                Conectado = false;
+                Resposta = "🔌 Desconectado";
+            }
+            else
+            {
+                // Conectar
+                System.Diagnostics.Debug.WriteLine(">>> INICIANDO CONEXÃO");
+                System.Diagnostics.Trace.WriteLine(">>> INICIANDO CONEXÃO");
+                
+                var dispositivo = new DispositivoESP32
+                {
+                    EnderecoIP = EnderecoIP,
+                    Porta = Porta
+                };
+                
+                System.Diagnostics.Debug.WriteLine($">>> IP: {EnderecoIP}, Porta: {Porta}");
+                
+                _httpService.ConfigurarDispositivo(dispositivo);
+                _configService.SalvarDispositivo(dispositivo);
+                
+                System.Diagnostics.Debug.WriteLine(">>> CHAMANDO TestarConexaoAsync");
+                var conectado = await _httpService.TestarConexaoAsync();
+                System.Diagnostics.Debug.WriteLine($">>> RESULTADO: {conectado}");
+                Resposta = conectado ? "✓ Conexão bem sucedida!" : "✗ Falha na conexão. Verifique o IP e se o ESP32 está ligado.";
+            }
         }
         catch (Exception ex)
         {
@@ -222,5 +238,38 @@ public class WiFiControlViewModel : BaseViewModel
         {
             IsBusy = false;
         }
+    }
+    
+    private void MostrarAjudaAsync()
+    {
+        var ajuda = @"OPÇÕES DE COMANDO CUSTOMIZADO:
+
+GET - Requisição de leitura:
+  /status - Retorna status completo
+  /temperatura - Temperatura
+  /umidade - Umidade
+  /sensores - Todos sensores
+  /gas - Nível de gás
+  /chama - Status chama
+  /som - Nível som
+  /led/on, /led/off, /led/toggle
+  /rele/1/on, /rele/1/off, /rele/1/toggle
+  /rele/2/on, /rele/2/off, /rele/2/toggle
+
+POST - Requisição com dados:
+  Payload JSON (opcional)
+  Ex: {""pino"":13, ""valor"":255}";
+        
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            if (Application.Current?.Windows.Count > 0)
+            {
+                var window = Application.Current.Windows[0];
+                if (window?.Page != null)
+                {
+                    await window.Page.DisplayAlert("ℹ️ Ajuda WiFi", ajuda, "OK");
+                }
+            }
+        });
     }
 }

@@ -66,6 +66,16 @@ public class ESP32HttpService
         LogDebug($"[WiFi] Dispositivo configurado: {dispositivo.UrlBase}");
     }
     
+    public void Desconectar()
+    {
+        if (_dispositivo != null)
+        {
+            _dispositivo.ConectadoWiFi = false;
+            OnStatusConexaoChanged?.Invoke(this, false);
+            LogDebug("[WiFi] Desconectado");
+        }
+    }
+    
     public async Task<bool> TestarConexaoAsync()
     {
         if (_dispositivo == null) 
@@ -219,6 +229,8 @@ public class ESP32HttpService
     public Task<string> ToggleLedAsync() => EnviarComandoAsync("led/toggle");
     public Task<string> LigarReleAsync(int numero = 1) => EnviarComandoAsync($"rele/{numero}/on");
     public Task<string> DesligarReleAsync(int numero = 1) => EnviarComandoAsync($"rele/{numero}/off");
+    public Task<string> ToggleRele1Async() => EnviarComandoAsync("rele/1/toggle");
+    public Task<string> ToggleRele2Async() => EnviarComandoAsync("rele/2/toggle");
     public Task<string> ObterTemperaturaAsync() => EnviarComandoAsync("temperatura");
     public Task<string> ObterUmidadeAsync() => EnviarComandoAsync("umidade");
     public Task<string> ObterStatusAsync() => EnviarComandoAsync("status");

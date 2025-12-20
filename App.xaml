@@ -16,6 +16,12 @@
             <converters:StringToBoolConverter x:Key="StringToBoolConverter"/>
             <converters:BoolToScanTextConverter x:Key="BoolToScanTextConverter"/>
             <converters:BoolToConnectColorConverter x:Key="BoolToConnectColorConverter"/>
+            <converters:GasToProgressConverter x:Key="GasToProgressConverter"/>
+            <converters:SomToProgressConverter x:Key="SomToProgressConverter"/>
+            <converters:AlertToColorConverter x:Key="AlertToColorConverter"/>
+            <converters:ChamaToBackgroundConverter x:Key="ChamaToBackgroundConverter"/>
+            <converters:ChamaToDetailBackgroundConverter x:Key="ChamaToDetailBackgroundConverter"/>
+            <converters:BoolToColorConverter x:Key="BoolToColorConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

@@ -112,10 +112,14 @@
                    HasShadow="True"
                    IsEnabled="{Binding Conectado}">
                 <VerticalStackLayout Spacing="12">
-                    <Label Text="💡 Controle de LED (BLE)"
-                           FontSize="16"
-                           FontAttributes="Bold"
-                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label Text="💡 Controle de LED (BLE)"
+                               FontSize="16"
+                               FontAttributes="Bold"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Label Grid.Column="1" Text="Pino: GPIO 13"
+                               FontSize="10" Opacity="0.6"/>
+                    </Grid>
                     
                     <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
                         <Button Text="ON"
@@ -146,10 +150,22 @@
                    HasShadow="True"
                    IsEnabled="{Binding Conectado}">
                 <VerticalStackLayout Spacing="12">
-                    <Label Text="🛠️ Comando BLE Customizado"
-                           FontSize="16"
-                           FontAttributes="Bold"
-                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label Text="🛠️ Comando BLE Customizado"
+                               FontSize="16"
+                               FontAttributes="Bold"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Button Grid.Column="1" 
+                                Text="?"
+                                Command="{Binding MostrarAjudaBLECommand}"
+                                BackgroundColor="#2196F3"
+                                TextColor="White"
+                                FontAttributes="Bold"
+                                Padding="4"
+                                WidthRequest="32"
+                                HeightRequest="32"
+                                CornerRadius="16"/>
+                    </Grid>
                     
                     <Entry Placeholder="Digite o comando (ex: LED_ON)"
                            Text="{Binding ComandoCustom}"

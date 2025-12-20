@@ -88,6 +88,9 @@ public class DashboardViewModel : BaseViewModel
     public ICommand TestarConexaoCommand { get; }
     public ICommand AtualizarSensoresCommand { get; }
     public ICommand ExecutarComandoCommand { get; }
+    public ICommand ToggleLedCommand { get; }
+    public ICommand ToggleRele1Command { get; }
+    public ICommand ToggleRele2Command { get; }
     
     public DashboardViewModel(
         ESP32HttpService httpService, 
@@ -103,6 +106,9 @@ public class DashboardViewModel : BaseViewModel
         TestarConexaoCommand = new Command(async () => await TestarConexaoAsync());
         AtualizarSensoresCommand = new Command(async () => await AtualizarSensoresAsync());
         ExecutarComandoCommand = new Command<ComandoESP32>(async (cmd) => await ExecutarComandoAsync(cmd));
+        ToggleLedCommand = new Command(async () => await ExecutarAsync(_httpService.ToggleLedAsync()));
+        ToggleRele1Command = new Command(async () => await ExecutarAsync(_httpService.ToggleRele1Async()));
+        ToggleRele2Command = new Command(async () => await ExecutarAsync(_httpService.ToggleRele2Async()));
         
         // Eventos
         _httpService.OnStatusConexaoChanged += (s, conectado) =>
@@ -199,6 +205,27 @@ public class DashboardViewModel : BaseViewModel
             {
                 comando.Estado = !comando.Estado;
             }
+        }
+        catch (Exception ex)
+        {
+            UltimaResposta = $"Erro: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+    
+    private async Task ExecutarAsync(Task<string> tarefa)
+    {
+        if (IsBusy) return;
+        
+        IsBusy = true;
+        
+        try
+        {
+            var resposta = await tarefa;
+            UltimaResposta = resposta;
         }
         catch (Exception ex)
         {
