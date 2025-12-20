@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<resources>
+    <!-- Base application theme inheriting from Material Components -->
+    <style name="AppTheme" parent="Theme.MaterialComponents.Light.DarkActionBar" />
+
+    <!-- MAUI Splash Theme also needs to inherit from Material Components -->
+    <style name="Maui.SplashTheme" parent="Theme.MaterialComponents.Light.DarkActionBar">
+        <item name="android:windowBackground">@drawable/maui_splash</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">false</item>
+    </style>
+</resources>

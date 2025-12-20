@@ -39,9 +39,7 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'tizen'">6.5</SupportedOSPlatformVersion>
-		
-		<!-- Android Permissions -->
-		<AndroidManifestPermissions>android.permission.INTERNET;android.permission.ACCESS_NETWORK_STATE;android.permission.BLUETOOTH;android.permission.BLUETOOTH_ADMIN;android.permission.BLUETOOTH_SCAN;android.permission.BLUETOOTH_CONNECT;android.permission.ACCESS_FINE_LOCATION;android.permission.ACCESS_COARSE_LOCATION</AndroidManifestPermissions>
+	
 	</PropertyGroup>
 
 	<ItemGroup>

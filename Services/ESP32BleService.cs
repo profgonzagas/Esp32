@@ -34,8 +34,18 @@ public class ESP32BleService
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine("[BLE] Inicializando BLE Service...");
+            
             _ble = CrossBluetoothLE.Current;
             _adapter = CrossBluetoothLE.Current.Adapter;
+            
+            if (_ble == null)
+            {
+                System.Diagnostics.Debug.WriteLine("[BLE] ❌ BLE não disponível no dispositivo!");
+                return;
+            }
+            
+            System.Diagnostics.Debug.WriteLine($"[BLE] ✓ BLE disponível - Estado: {(_ble.IsOn ? "ON" : "OFF")}");
             
             if (_adapter != null)
             {
@@ -43,13 +53,21 @@ public class ESP32BleService
                 _adapter.DeviceDiscovered += OnDeviceDiscovered;
                 _adapter.DeviceConnected += OnDeviceConnected;
                 _adapter.DeviceDisconnected += OnDeviceDisconnected;
+                
+                System.Diagnostics.Debug.WriteLine("[BLE] ✓ Adapter inicializado e eventos subscritos");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("[BLE] ❌ Adapter retornou NULL!");
             }
             
-            System.Diagnostics.Debug.WriteLine("[BLE] Serviço BLE inicializado");
+            System.Diagnostics.Debug.WriteLine("[BLE] Serviço BLE inicializado com sucesso");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[BLE] Erro ao inicializar: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] ❌ ERRO ao inicializar: {ex.GetType().Name}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] Mensagem: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] Stack: {ex.StackTrace}");
         }
     }
     
@@ -77,32 +95,53 @@ public class ESP32BleService
         
         try
         {
-            if (_ble == null || _adapter == null)
+            System.Diagnostics.Debug.WriteLine("[BLE] ===== INICIANDO SCAN =====");
+            
+            // 🔴 IMPORTANTE: Solicitar permissões ANTES de iniciar scan
+            System.Diagnostics.Debug.WriteLine("[BLE] Solicitando permissões de Bluetooth...");
+            bool permissionsGranted = await PermissionsService.RequestBluetoothPermissionsAsync();
+            System.Diagnostics.Debug.WriteLine($"[BLE] Permissões: {(permissionsGranted ? "✓ ACEITAS" : "❌ NEGADAS")}");
+            
+            if (!permissionsGranted)
             {
-                System.Diagnostics.Debug.WriteLine("[BLE] BLE ou Adapter não disponível");
+                System.Diagnostics.Debug.WriteLine("[BLE] ❌ Permissões de Bluetooth foram negadas!");
                 OnDispositivosEncontrados?.Invoke(this, dispositivos);
                 return dispositivos;
             }
             
-            System.Diagnostics.Debug.WriteLine($"[BLE] Iniciando scan por {timeoutSeconds}s");
+            if (_ble == null || _adapter == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[BLE] ❌ BLE={_ble} | Adapter={_adapter}");
+                OnDispositivosEncontrados?.Invoke(this, dispositivos);
+                return dispositivos;
+            }
+            
+            System.Diagnostics.Debug.WriteLine($"[BLE] Estado do Bluetooth: {(_ble.IsOn ? "✓ ON" : "❌ OFF")}");
             
             // Verificar estado do Bluetooth
             if (!_ble.IsOn)
             {
-                System.Diagnostics.Debug.WriteLine("[BLE] Bluetooth está desligado");
+                System.Diagnostics.Debug.WriteLine("[BLE] ❌ Bluetooth está desligado - ative no celular!");
                 OnDispositivosEncontrados?.Invoke(this, dispositivos);
                 return dispositivos;
             }
             
+            System.Diagnostics.Debug.WriteLine($"[BLE] Iniciando scan por {timeoutSeconds}s...");
+            
             // Escanear por dispositivos
             await _adapter.StartScanningForDevicesAsync();
+            System.Diagnostics.Debug.WriteLine("[BLE] Scanning iniciado");
             
             // Aguardar timeout
             await Task.Delay(timeoutSeconds * 1000);
             
             await _adapter.StopScanningForDevicesAsync();
+            System.Diagnostics.Debug.WriteLine("[BLE] Scanning parado");
             
             // Converter para modelo da aplicação
+            var count = _adapter.DiscoveredDevices.Count;
+            System.Diagnostics.Debug.WriteLine($"[BLE] Total encontrado: {count} dispositivos");
+            
             foreach (var device in _adapter.DiscoveredDevices)
             {
                 dispositivos.Add(new DispositivoBLE
@@ -112,19 +151,22 @@ public class ESP32BleService
                     Rssi = device.Rssi
                 });
                 
-                System.Diagnostics.Debug.WriteLine($"[BLE] Encontrado: {device.Name} ({device.Id}) - RSSI: {device.Rssi}");
+                System.Diagnostics.Debug.WriteLine($"[BLE]   → {device.Name} ({device.Id}) - RSSI: {device.Rssi} dBm");
             }
             
             OnDispositivosEncontrados?.Invoke(this, dispositivos);
-            System.Diagnostics.Debug.WriteLine($"[BLE] Scan concluído - {dispositivos.Count} dispositivos encontrados");
+            System.Diagnostics.Debug.WriteLine($"[BLE] Scan concluído - {dispositivos.Count} dispositivos retornados");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[BLE] Erro ao escanear: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] ❌ ERRO ao escanear: {ex.GetType().Name}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] Mensagem: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] Stack: {ex.StackTrace}");
         }
         finally
         {
             _isScanning = false;
+            System.Diagnostics.Debug.WriteLine("[BLE] ===== FIM DO SCAN =====");
         }
         
         return dispositivos;

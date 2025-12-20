@@ -48,7 +48,14 @@ public class BLEControlViewModel : BaseViewModel
     public DispositivoBLE? DispositivoSelecionado
     {
         get => _dispositivoSelecionado;
-        set => SetProperty(ref _dispositivoSelecionado, value);
+        set 
+        { 
+            if (SetProperty(ref _dispositivoSelecionado, value) && value != null)
+            {
+                // Conectar automaticamente quando selecionar um dispositivo
+                MainThread.BeginInvokeOnMainThread(async () => await ConectarToggleAsync());
+            }
+        }
     }
     
     public ObservableCollection<DispositivoBLE> Dispositivos
@@ -63,6 +70,7 @@ public class BLEControlViewModel : BaseViewModel
     
     public ICommand EscanearCommand { get; }
     public ICommand ConectarCommand { get; }
+    public ICommand SelecionarDispositivoCommand { get; }
     public ICommand EnviarComandoCommand { get; }
     public ICommand LigarLedCommand { get; }
     public ICommand DesligarLedCommand { get; }
@@ -77,6 +85,7 @@ public class BLEControlViewModel : BaseViewModel
         
         EscanearCommand = new Command(async () => await EscanearAsync());
         ConectarCommand = new Command(async () => await ConectarToggleAsync());
+        SelecionarDispositivoCommand = new Command<DispositivoBLE>(async (device) => await SelecionarDispositivoAsync(device));
         EnviarComandoCommand = new Command(async () => await EnviarComandoCustomAsync());
         LigarLedCommand = new Command(async () => await ExecutarAsync(_bleService.LigarLedAsync()));
         DesligarLedCommand = new Command(async () => await ExecutarAsync(_bleService.DesligarLedAsync()));
@@ -111,10 +120,20 @@ public class BLEControlViewModel : BaseViewModel
         if (Escaneando) return;
         
         Escaneando = true;
-        Resposta = "Escaneando dispositivos BLE...";
+        Resposta = "Verificando permissões...";
         
         try
         {
+            // Pedir permissões BLE
+            bool temPermissoes = await PermissionsService.RequestBluetoothPermissionsAsync();
+            
+            if (!temPermissoes)
+            {
+                Resposta = "Permissões de Bluetooth negadas. Ative em Configurações → Aplicativos → Permissões";
+                return;
+            }
+            
+            Resposta = "Escaneando dispositivos BLE...";
             var dispositivos = await _bleService.ScanearDispositivosAsync(10);
             
             if (dispositivos.Count == 0)
@@ -165,6 +184,20 @@ public class BLEControlViewModel : BaseViewModel
         {
             IsBusy = false;
         }
+    }
+    
+    private async Task SelecionarDispositivoAsync(DispositivoBLE device)
+    {
+        if (device == null) return;
+        
+        DispositivoSelecionado = device;
+        Resposta = $"Conectando a {device.Nome}...";
+        
+        var conectado = await _bleService.ConectarAsync(device.Id);
+        
+        Resposta = conectado 
+            ? $"✅ Conectado a {device.Nome}" 
+            : $"❌ Falha ao conectar em {device.Nome}";
     }
     
     private async Task EnviarComandoCustomAsync()

@@ -16,6 +16,26 @@ public class ESP32HttpService
     public event EventHandler<string>? OnMensagemRecebida;
     public event EventHandler<bool>? OnStatusConexaoChanged;
     
+    private void LogDebug(string msg)
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine(msg);
+            // Tentar escrever para um caminho acessível
+            try
+            {
+                var logDir = "/sdcard/Download/";
+                var logPath = Path.Combine(logDir, "esp32_debug.log");
+                if (Directory.Exists(logDir) && logPath.Length > 0)
+                {
+                    File.AppendAllText(logPath, $"{DateTime.Now:HH:mm:ss.fff} - {msg}\n");
+                }
+            }
+            catch { }
+        }
+        catch { }
+    }
+    
     public ESP32HttpService()
     {
         var handler = new HttpClientHandler();
@@ -28,33 +48,36 @@ public class ESP32HttpService
         
         _httpClient = new HttpClient(handler)
         {
-            Timeout = TimeSpan.FromSeconds(15), // Aumentado para 15 segundos
-            DefaultRequestVersion = HttpVersion.Version20
+            Timeout = TimeSpan.FromSeconds(20), // Aumentado para 20 segundos
+            DefaultRequestVersion = HttpVersion.Version11 // HTTP/1.1 mais compatível
         };
         
         // Headers padrão
-        _httpClient.DefaultRequestHeaders.Add("Connection", "keep-alive");
+        _httpClient.DefaultRequestHeaders.Add("Connection", "close");
         _httpClient.DefaultRequestHeaders.Add("User-Agent", "ESP32-Controller/1.0");
+        _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+        
+        LogDebug("[WiFi] HttpClient inicializado com timeout de 20s");
     }
     
     public void ConfigurarDispositivo(DispositivoESP32 dispositivo)
     {
         _dispositivo = dispositivo;
-        System.Diagnostics.Debug.WriteLine($"[WiFi] Dispositivo configurado: {dispositivo.UrlBase}");
+        LogDebug($"[WiFi] Dispositivo configurado: {dispositivo.UrlBase}");
     }
     
     public async Task<bool> TestarConexaoAsync()
     {
         if (_dispositivo == null) 
         {
-            System.Diagnostics.Debug.WriteLine("[WiFi] Dispositivo não configurado");
+            LogDebug("[WiFi] Dispositivo não configurado");
             return false;
         }
         
         try
         {
             var url = $"{_dispositivo.UrlBase}/status";
-            System.Diagnostics.Debug.WriteLine($"[WiFi] Testando conexão: {url}");
+            LogDebug($"[WiFi] Testando conexão: {url}");
             
             // Tentar com retentativas
             for (int tentativa = 1; tentativa <= _retentativas; tentativa++)
@@ -65,14 +88,14 @@ public class ESP32HttpService
                     {
                         var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseContentRead, cts.Token);
                         
-                        System.Diagnostics.Debug.WriteLine($"[WiFi] Tentativa {tentativa}: {response.StatusCode}");
+                        LogDebug($"[WiFi] Tentativa {tentativa}: {response.StatusCode}");
                         
                         if (response.IsSuccessStatusCode)
                         {
                             _dispositivo.ConectadoWiFi = true;
                             _dispositivo.UltimaConexao = DateTime.Now;
                             OnStatusConexaoChanged?.Invoke(this, true);
-                            System.Diagnostics.Debug.WriteLine("[WiFi] ✓ Conectado com sucesso");
+                            LogDebug("[WiFi] ✓ Conectado com sucesso");
                             return true;
                         }
                     }

@@ -143,6 +143,8 @@ public class WiFiControlViewModel : BaseViewModel
         if (IsBusy) return;
         
         IsBusy = true;
+        System.Diagnostics.Debug.WriteLine(">>> INICIANDO CONEXÃO");
+        System.Diagnostics.Trace.WriteLine(">>> INICIANDO CONEXÃO");
         
         try
         {
@@ -152,11 +154,21 @@ public class WiFiControlViewModel : BaseViewModel
                 Porta = Porta
             };
             
+            System.Diagnostics.Debug.WriteLine($">>> IP: {EnderecoIP}, Porta: {Porta}");
+            
             _httpService.ConfigurarDispositivo(dispositivo);
             _configService.SalvarDispositivo(dispositivo);
             
+            System.Diagnostics.Debug.WriteLine(">>> CHAMANDO TestarConexaoAsync");
             var conectado = await _httpService.TestarConexaoAsync();
-            Resposta = conectado ? "Conexão bem sucedida!" : "Falha na conexão. Verifique o IP e se o ESP32 está ligado.";
+            System.Diagnostics.Debug.WriteLine($">>> RESULTADO: {conectado}");
+            Resposta = conectado ? "✓ Conexão bem sucedida!" : "✗ Falha na conexão. Verifique o IP e se o ESP32 está ligado.";
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($">>> ERRO: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($">>> STACK: {ex.StackTrace}");
+            Resposta = $"✗ Erro: {ex.Message}";
         }
         finally
         {

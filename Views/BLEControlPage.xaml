@@ -52,8 +52,6 @@
                     
                     <!-- Lista de Dispositivos -->
                     <CollectionView ItemsSource="{Binding Dispositivos}"
-                                    SelectionMode="Single"
-                                    SelectedItem="{Binding DispositivoSelecionado}"
                                     HeightRequest="150">
                         <CollectionView.ItemTemplate>
                             <DataTemplate x:DataType="services:DispositivoBLE">
@@ -61,6 +59,11 @@
                                        CornerRadius="8"
                                        Padding="12"
                                        Margin="0,4">
+                                    <Frame.GestureRecognizers>
+                                        <TapGestureRecognizer 
+                                            Command="{Binding Source={RelativeSource AncestorType={x:Type vm:BLEControlViewModel}}, Path=SelecionarDispositivoCommand}"
+                                            CommandParameter="{Binding .}"/>
+                                    </Frame.GestureRecognizers>
                                     <Grid ColumnDefinitions="Auto,*,Auto">
                                         <Label Text="📱"
                                                FontSize="24"
