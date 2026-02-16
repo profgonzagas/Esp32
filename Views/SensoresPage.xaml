@@ -35,33 +35,122 @@
                               IsVisible="{Binding IsBusy}"
                               HorizontalOptions="Center" />
             
-            <!-- Card DHT22 - Temperatura e Umidade -->
+            <!-- Card BME280 - Temperatura, Umidade e Pressão -->
             <Frame IsVisible="{Binding TemDados}" CornerRadius="15" Padding="20" 
                    BackgroundColor="{AppThemeBinding Light=#E3F2FD, Dark=#1E3A5F}" HasShadow="True">
                 <VerticalStackLayout Spacing="10">
-                    <Label Text="🌡️ DHT22 - Temperatura e Umidade" 
+                    <Label Text="🌡️ BME280 - Sensor de Precisão Alta" 
                            FontSize="18" FontAttributes="Bold" />
-                    <Label Text="Pino: GPIO 4" 
+                    <Label Text="I2C: GPIO 21 (SDA) / GPIO 22 (SCL)" 
                            FontSize="10" Opacity="0.6" Margin="0,-5,0,0"/>
                     <BoxView HeightRequest="1" Color="{StaticResource Primary}" Opacity="0.3"/>
                     
-                    <Grid ColumnDefinitions="*,*" ColumnSpacing="20" Margin="0,10,0,0">
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="15" Margin="0,10,0,0">
                         <VerticalStackLayout>
                             <Label Text="Temperatura" FontSize="12" Opacity="0.7"/>
                             <Label Text="{Binding Dados.TemperaturaFormatada}" 
-                                   FontSize="24" FontAttributes="Bold" TextColor="{StaticResource Primary}"/>
+                                   FontSize="22" FontAttributes="Bold" TextColor="{StaticResource Primary}"/>
                         </VerticalStackLayout>
                         
                         <VerticalStackLayout Grid.Column="1">
                             <Label Text="Umidade" FontSize="12" Opacity="0.7"/>
                             <Label Text="{Binding Dados.UmidadeFormatada}" 
-                                   FontSize="24" FontAttributes="Bold" TextColor="#2196F3"/>
+                                   FontSize="22" FontAttributes="Bold" TextColor="#2196F3"/>
+                        </VerticalStackLayout>
+                        
+                        <VerticalStackLayout Grid.Column="2">
+                            <Label Text="Pressão" FontSize="12" Opacity="0.7"/>
+                            <Label Text="{Binding Dados.PressaoFormatada}" 
+                                   FontSize="18" FontAttributes="Bold" TextColor="#FF9800"/>
                         </VerticalStackLayout>
                     </Grid>
+                    
+                    <!-- Informações adicionais sobre pressão -->
+                    <Frame CornerRadius="8" Padding="10" BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#2A3A5F}" 
+                           Margin="0,10,0,0" BorderColor="#FF9800" BorderWidth="1">
+                        <Label Text="✓ Sensor de alta precisão 3.3V - Ideal para medições atmosféricas precisas" 
+                               FontSize="11" Opacity="0.8" LineBreakMode="WordWrap"/>
+                    </Frame>
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Card DHT22 - Temperatura e Umidade -->
+            <Frame IsVisible="{Binding TemDados}" CornerRadius="15" Padding="20" 
+                   BackgroundColor="{AppThemeBinding Light=#EFFFD4, Dark=#3A5F1E}" HasShadow="True">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="🌡️ DHT22 - Sensor Digital" 
+                           FontSize="18" FontAttributes="Bold" />
+                    <Label Text="GPIO: 4 (Digital com resistor 4.7kΩ)" 
+                           FontSize="10" Opacity="0.6" Margin="0,-5,0,0"/>
+                    <BoxView HeightRequest="1" Color="#4CAF50" Opacity="0.3"/>
+                    
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="20" Margin="0,10,0,0">
+                        <VerticalStackLayout>
+                            <Label Text="Temperatura" FontSize="12" Opacity="0.7"/>
+                            <Label Text="{Binding Dados.TemperaturaDHT22Formatada}" 
+                                   FontSize="22" FontAttributes="Bold" TextColor="#4CAF50"/>
+                        </VerticalStackLayout>
+                        
+                        <VerticalStackLayout Grid.Column="1">
+                            <Label Text="Umidade" FontSize="12" Opacity="0.7"/>
+                            <Label Text="{Binding Dados.UmidadeDHT22Formatada}" 
+                                   FontSize="22" FontAttributes="Bold" TextColor="#66BB6A"/>
+                        </VerticalStackLayout>
+                    </Grid>
+                    
+                    <!-- Informações adicionais DHT22 -->
+                    <Frame CornerRadius="8" Padding="10" BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#2A3A5F}" 
+                           Margin="0,10,0,0" BorderColor="#4CAF50" BorderWidth="1">
+                        <Label Text="✓ Sensor digital econômico - Ótimo custo-benefício para medições de umidade/temperatura" 
+                               FontSize="11" Opacity="0.8" LineBreakMode="WordWrap"/>
+                    </Frame>
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Card UV - GUVA-S12SD -->
+            <Frame IsVisible="{Binding TemDados}" CornerRadius="15" Padding="20" 
+                   BackgroundColor="{AppThemeBinding Light=#FFF3E0, Dark=#5F4A1E}" HasShadow="True">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="☀️ GUVA-S12SD - Sensor de Radiação UV" 
+                           FontSize="18" FontAttributes="Bold" />
+                    <Label Text="GPIO 34 (Analógico)" 
+                           FontSize="10" Opacity="0.6" Margin="0,-5,0,0"/>
+                    <BoxView HeightRequest="1" Color="#FF9800" Opacity="0.3"/>
+                    
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="20" Margin="0,10,0,0">
+                        <VerticalStackLayout>
+                            <Label Text="Índice UV" FontSize="12" Opacity="0.7"/>
+                            <Label Text="{Binding Dados.IndiceUVFormatado}" 
+                                   FontSize="28" FontAttributes="Bold" 
+                                   TextColor="{Binding Dados.CorUV}"/>
+                        </VerticalStackLayout>
+                        
+                        <VerticalStackLayout Grid.Column="1" VerticalOptions="Center">
+                            <Label Text="Classificação" FontSize="11" Opacity="0.7"/>
+                            <Label Text="{Binding Dados.ClassificacaoUV}" 
+                                   FontSize="16" FontAttributes="Bold"/>
+                            <Label Text="{Binding Dados.NivelUV, StringFormat='ADC: {0:N0}'}" 
+                                   FontSize="10" Opacity="0.6" Margin="0,5,0,0"/>
+                        </VerticalStackLayout>
+                    </Grid>
+                    
+                    <!-- Escala de UV -->
+                    <Frame CornerRadius="8" Padding="10" BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#2A3A5F}" 
+                           Margin="0,10,0,0" BorderColor="#FF9800" BorderWidth="1">
+                        <VerticalStackLayout Spacing="5">
+                            <Label Text="Escala UV:" FontSize="10" FontAttributes="Bold" Opacity="0.7"/>
+                            <Grid ColumnDefinitions="30,30,30,30,30" ColumnSpacing="2">
+                                <Label Text="🟢" FontSize="14" HorizontalOptions="Center" ToolTipProperties.Text="0-2: Baixo"/>
+                                <Label Text="🟡" FontSize="14" HorizontalOptions="Center" Grid.Column="1" ToolTipProperties.Text="3-5: Moderado"/>
+                                <Label Text="🟠" FontSize="14" HorizontalOptions="Center" Grid.Column="2" ToolTipProperties.Text="6-7: Alto"/>
+                                <Label Text="🔴" FontSize="14" HorizontalOptions="Center" Grid.Column="3" ToolTipProperties.Text="8-10: Muito Alto"/>
+                                <Label Text="🟣" FontSize="14" HorizontalOptions="Center" Grid.Column="4" ToolTipProperties.Text="11+: Extremo"/>
+                            </Grid>
+                        </VerticalStackLayout>
+                    </Frame>
                 </VerticalStackLayout>
             </Frame>
             
-            <!-- Card MQ-5 - Gás -->
             <Frame IsVisible="{Binding TemDados}" CornerRadius="15" Padding="20" 
                    BackgroundColor="{AppThemeBinding Light=#FFF3E0, Dark=#5F3A1E}" HasShadow="True">
                 <VerticalStackLayout Spacing="10">

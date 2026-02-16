@@ -164,7 +164,8 @@ public class BLEControlViewModel : BaseViewModel
             if (Conectado)
             {
                 await _bleService.DesconectarAsync();
-                Resposta = "Desconectado";
+                Conectado = false;
+                Resposta = "🔌 Desconectado";
             }
             else
             {
@@ -178,8 +179,8 @@ public class BLEControlViewModel : BaseViewModel
                 var conectado = await _bleService.ConectarAsync(DispositivoSelecionado.Id);
                 
                 Resposta = conectado 
-                    ? $"Conectado a {DispositivoSelecionado.Nome}" 
-                    : "Falha na conexão";
+                    ? $"✅ Conectado a {DispositivoSelecionado.Nome}" 
+                    : "❌ Falha na conexão";
             }
         }
         finally

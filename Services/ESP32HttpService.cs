@@ -240,13 +240,53 @@ public class ESP32HttpService
     {
         try
         {
-            var json = await EnviarComandoAsync("sensores");
+            // Usar o endpoint /status que retorna JSON estruturado com ámbos os sensores
+            var json = await EnviarComandoAsync("status");
             if (string.IsNullOrEmpty(json)) return null;
             
-            var dados = JsonSerializer.Deserialize<DadosSensores>(json, new JsonSerializerOptions
+            // Deserializar o JSON da resposta /status
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            
+            var dados = new DadosSensores();
+            
+            // Extrair dados BME280
+            if (root.TryGetProperty("sensores", out var sensoresElement))
             {
-                PropertyNameCaseInsensitive = true
-            });
+                if (sensoresElement.TryGetProperty("bme280", out var bme280Element))
+                {
+                    if (bme280Element.TryGetProperty("temperatura", out var tempBME))
+                        dados.Temperatura = (float)tempBME.GetDouble();
+                    
+                    if (bme280Element.TryGetProperty("umidade", out var umidBME))
+                        dados.Umidade = (float)umidBME.GetDouble();
+                    
+                    if (bme280Element.TryGetProperty("pressao", out var pressaoBME))
+                        dados.Pressao = (float)pressaoBME.GetDouble();
+                }
+                
+                // Extrair dados DHT22
+                if (sensoresElement.TryGetProperty("dht22", out var dht22Element))
+                {
+                    if (dht22Element.TryGetProperty("temperatura", out var tempDHT))
+                        dados.TemperaturaDHT22 = (float)tempDHT.GetDouble();
+                    
+                    if (dht22Element.TryGetProperty("umidade", out var umidDHT))
+                        dados.UmidadeDHT22 = (float)umidDHT.GetDouble();
+                }
+                
+                // Extrair dados UV
+                if (sensoresElement.TryGetProperty("uv", out var uvElement))
+                {
+                    if (uvElement.TryGetProperty("nivel", out var nivelUV))
+                        dados.NivelUV = nivelUV.GetInt32();
+                    
+                    if (uvElement.TryGetProperty("indice", out var indiceUV))
+                        dados.IndiceUV = (float)indiceUV.GetDouble();
+                }
+            }
+            
+            dados.UltimaAtualizacao = DateTime.Now;
             return dados;
         }
         catch (Exception ex)
