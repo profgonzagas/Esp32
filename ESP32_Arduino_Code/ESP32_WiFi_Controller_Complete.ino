@@ -1,23 +1,14 @@
 /*
- * NecroSENSE - Código WiFi HTTP para ESP32
+ * NecroSENSE - Código WiFi HTTP Completo para ESP32
  * 
- * Este código cria um servidor HTTP no ESP32 para receber comandos
- * do aplicativo NecroSENSE (MAUI) via WiFi
+ * Sensores Integrados:
+ * - BME280: Temperatura, Umidade, Pressão (I2C)
+ * - DHT22: Temperatura, Umidade (Digital)
+ * - GUVA-S12SD: Radiação UV (Analógico)
+ * - Cartão SD: Logging de dados (SPI)
  * 
- * Endpoints disponíveis:
- * - GET  /status          - Retorna status do dispositivo
- * - GET  /sensores        - Retorna leitura dos sensores
- * - GET  /led/on          - Liga o LED
- * - GET  /led/off         - Desliga o LED
- * - GET  /led/toggle      - Alterna o LED
- * - GET  /rele/1/on       - Liga relé 1
- * - GET  /rele/1/off      - Desliga relé 1
- * - GET  /rele/2/on       - Liga relé 2
- * - GET  /rele/2/off      - Desliga relé 2
- * - GET  /temperatura     - Leitura de temperatura
- * - GET  /umidade         - Leitura de umidade
- * - GET  /pwm/:pino/:valor - Define PWM em um pino
- * - GET  /gpio/:pino/:state - Define estado de um GPIO
+ * Este código cria um servidor HTTP no ESP32 com todos os sensores
+ * integrados e salvamento de dados em cartão SD
  */
 
 #include <WiFi.h>
@@ -26,6 +17,8 @@
 #include <Wire.h>
 #include <Adafruit_BME280.h>
 #include <DHT.h>
+#include <SD.h>
+#include <SPI.h>
 #include <time.h>
 
 // ==================== CONFIGURAÇÕES DE REDE ====================
@@ -43,6 +36,11 @@ const int PORT = 80;
 #define DHT22_PIN 4         // DHT22 em GPIO 4
 #define DHTTYPE DHT22       // Usar DHT22
 #define UV_PIN 34           // GUVA-S12SD em GPIO 34 (Analógico)
+// Pinos do SD Card (SPI)
+#define SD_CS_PIN 5         // Chip Select em GPIO 5
+#define SD_CLK_PIN 18       // Clock em GPIO 18 (SCK)
+#define SD_MOSI_PIN 23      // MOSI/DI/DIN em GPIO 23
+#define SD_MISO_PIN 19      // MISO/DO/DOUT em GPIO 19
 
 // ==================== OBJETOS GLOBAIS ====================
 WebServer server(PORT);
@@ -65,6 +63,10 @@ struct Estado {
   int nivelUV = 0;           // 0-1023 (valor analógico)
   float indiceUV = 0.0;      // Índice UV calculado (0-15)
   unsigned long ultimaLeituraUV = 0;
+  // SD Card
+  bool cartaoSDconectado = false;
+  unsigned long ultimaGravagemSD = 0;
+  const unsigned long INTERVALO_GRAVACAO_SD = 30000; // Grava a cada 30 segundos
   
   unsigned long ultimaLeituraTemp = 0;
   unsigned long ultimaLeituraDHT22 = 0;
@@ -135,6 +137,128 @@ void inicializarBME280() {
   
   Serial.println("✓ Sensor configurado em modo normal");
 }
+
+/**
+ * Inicializa o cartão SD
+ */
+void inicializarCartaoSD() {
+  Serial.println("\n=== INICIALIZANDO CARTÃO SD ===");
+  
+  // Configurar pinos SPI
+  SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+  
+  // Inicializar SD
+  if (!SD.begin(SD_CS_PIN)) {
+    Serial.println("✗ Falha ao inicializar cartão SD!");
+    Serial.println("Verifique as conexões:");
+    Serial.println("  CS   -> GPIO 5");
+    Serial.println("  CLK  -> GPIO 18 (SCK)");
+    Serial.println("  MOSI -> GPIO 23 (DI/DIN)");
+    Serial.println("  MISO -> GPIO 19 (DO/DOUT)");
+    Serial.println("  VCC  -> 3.3V");
+    Serial.println("  GND  -> GND");
+    estado.cartaoSDconectado = false;
+    return;
+  }
+  
+  estado.cartaoSDconectado = true;
+  Serial.println("✓ Cartão SD inicializado com sucesso!");
+  
+  uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+  Serial.print("Tamanho do cartão: ");
+  Serial.print(cardSize);
+  Serial.println(" MB");
+  
+  // Criar arquivo de cabeçalho
+  criarArquivoCSV();
+}
+
+/**
+ * Cria arquivo CSV com cabeçalho
+ */
+void criarArquivoCSV() {
+  if (!estado.cartaoSDconectado) return;
+  
+  String nomeArquivo = "/dados_" + String(millis() / 1000) + ".csv";
+  
+  if (!SD.exists(nomeArquivo)) {
+    File arquivo = SD.open(nomeArquivo, FILE_WRITE);
+    if (arquivo) {
+      arquivo.println("Timestamp,Temp_BME280,Umid_BME280,Press,Temp_DHT22,Umid_DHT22,UV_Index");
+      arquivo.close();
+      Serial.print("✓ Arquivo criado: ");
+      Serial.println(nomeArquivo);
+    }
+  }
+}
+
+/**
+ * Grava dados dos sensores no SD Card
+ */
+void gravarDadosSD() {
+  if (!estado.cartaoSDconectado) return;
+  
+  unsigned long agora = millis();
+  if (agora - estado.ultimaGravagemSD < estado.INTERVALO_GRAVACAO_SD) {
+    return;
+  }
+  
+  estado.ultimaGravagemSD = agora;
+  
+  // Procurar arquivo mais recente
+  File raiz = SD.open("/");
+  File arquivo;
+  String nomeArquivo = "";
+  
+  arquivo = raiz.openNextFile();
+  while (arquivo) {
+    String nome = arquivo.name();
+    if (nome.endsWith(".csv")) {
+      nomeArquivo = "/" + nome;
+    }
+    arquivo.close();
+    arquivo = raiz.openNextFile();
+  }
+  raiz.close();
+  
+  if (nomeArquivo == "") {
+    criarArquivoCSV();
+    return;
+  }
+  
+  // Abrir arquivo para adicionar dados
+  arquivo = SD.open(nomeArquivo, FILE_APPEND);
+  if (arquivo) {
+    // Construir linha CSV
+    String linha = "";
+    linha += agora;
+    linha += ",";
+    linha += String(estado.temperatura_bme280, 2);
+    linha += ",";
+    linha += String(estado.umidade_bme280, 2);
+    linha += ",";
+    linha += String(estado.pressao, 2);
+    linha += ",";
+    linha += String(estado.temperatura_dht22, 2);
+    linha += ",";
+    linha += String(estado.umidade_dht22, 2);
+    linha += ",";
+    linha += String(estado.indiceUV, 1);
+    
+    arquivo.println(linha);
+    arquivo.close();
+    
+    Serial.println("[SD_CARD] Dados gravados com sucesso");
+  } else {
+    Serial.println("[SD_CARD] Erro ao abrir arquivo");
+    estado.cartaoSDconectado = false;
+  }
+}
+
+/**
+ * Inicializa a conexão WiFi
+ */
+void inicializarWiFi() {
   Serial.println("\n\n=== INICIALIZANDO WiFi ===");
   Serial.print("Conectando a WiFi: ");
   Serial.println(ssid);
@@ -175,7 +299,7 @@ void configurarRotas() {
   
   // Rota raiz
   server.on("/", HTTP_GET, []() {
-    enviarJSON("{\"status\":\"ok\",\"dispositivo\":\"NecroSENSE ESP32\",\"versao\":\"1.0\"}");
+    enviarJSON("{\"status\":\"ok\",\"dispositivo\":\"NecroSENSE ESP32\",\"versao\":\"2.2\"}");
   });
   
   // Status geral
@@ -225,7 +349,7 @@ void configurarRotas() {
   // Leitura de temperatura BME280
   server.on("/temperatura", HTTP_GET, []() {
     lerSensoresBME280();
-    String response = "{\"status\":\"ok\",\"sensor\":\"BME280\",\"temperatura\":\" + String(estado.temperatura_bme280, 2) + ",\"unidade\":\"°C\"}";
+    String response = "{\"status\":\"ok\",\"sensor\":\"BME280\",\"temperatura\":" + String(estado.temperatura_bme280, 2) + ",\"unidade\":\"°C\"}";
     enviarJSON(response);
   });
   
@@ -268,6 +392,60 @@ void configurarRotas() {
   // GPIO genérico
   server.on("/gpio", HTTP_GET, handleGPIO);
   
+  // ===== ROTAS DO CARTÃO SD =====
+  // Obter status do SD Card
+  server.on("/sd/status", HTTP_GET, []() {
+    String status = estado.cartaoSDconectado ? "conectado" : "desconectado";
+    enviarJSON("{\"status\":\"ok\",\"cartao_sd\":\"" + status + "\"}");
+  });
+  
+  // Listar arquivos do SD Card
+  server.on("/sd/listar", HTTP_GET, []() {
+    if (!estado.cartaoSDconectado) {
+      enviarJSON("{\"status\":\"erro\",\"mensagem\":\"Cartão SD não conectado\"}");
+      return;
+    }
+    
+    String json = "{\"status\":\"ok\",\"arquivos\":[";
+    File raiz = SD.open("/");
+    File arquivo = raiz.openNextFile();
+    bool primeiro = true;
+    
+    while (arquivo) {
+      if (!arquivo.isDirectory()) {
+        if (!primeiro) json += ",";
+        json += "\"" + String(arquivo.name()) + "\"";
+        primeiro = false;
+      }
+      arquivo.close();
+      arquivo = raiz.openNextFile();
+    }
+    raiz.close();
+    json += "]}";
+    enviarJSON(json);
+  });
+  
+  // Deletar arquivo do SD Card
+  server.on("/sd/deletar", HTTP_GET, []() {
+    if (!estado.cartaoSDconectado) {
+      enviarJSON("{\"status\":\"erro\",\"mensagem\":\"Cartão SD não conectado\"}");
+      return;
+    }
+    
+    String nomeArquivo = server.arg("arquivo");
+    if (nomeArquivo == "") {
+      enviarJSON("{\"status\":\"erro\",\"mensagem\":\"Nome do arquivo não fornecido\"}");
+      return;
+    }
+    
+    if (SD.remove("/" + nomeArquivo)) {
+      enviarJSON("{\"status\":\"ok\",\"mensagem\":\"Arquivo deletado com sucesso\"}");
+    } else {
+      enviarJSON("{\"status\":\"erro\",\"mensagem\":\"Falha ao deletar arquivo\"}");
+      estado.cartaoSDconectado = false;
+    }
+  });
+  
   // Tratamento de rotas não encontradas
   server.onNotFound([]() {
     enviarJSON("{\"status\":\"erro\",\"mensagem\":\"Rota não encontrada\"}");
@@ -299,13 +477,14 @@ void handleStatus() {
   String json = "{";
   json += "\"status\":\"conectado\",";
   json += "\"dispositivo\":\"NecroSENSE ESP32\",";
-  json += "\"versao\":\"2.1\",";
+  json += "\"versao\":\"2.2\",";
   json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
   json += "\"ssid\":\"" + String(WiFi.SSID()) + "\",";
   json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
   json += "\"estado_led\":" + String(estado.led ? "true" : "false") + ",";
   json += "\"estado_rele1\":" + String(estado.rele1 ? "true" : "false") + ",";
   json += "\"estado_rele2\":" + String(estado.rele2 ? "true" : "false") + ",";
+  json += "\"cartao_sd\":\"" + String(estado.cartaoSDconectado ? "conectado" : "desconectado") + "\",";
   json += "\"sensores\":{";
   json += "\"bme280\":{\"temperatura\":" + String(estado.temperatura_bme280, 2) + ",\"umidade\":" + String(estado.umidade_bme280, 2) + ",\"pressao\":" + String(estado.pressao, 2) + "},";
   json += "\"dht22\":{\"temperatura\":" + String(estado.temperatura_dht22, 2) + ",\"umidade\":" + String(estado.umidade_dht22, 2) + "},";
@@ -550,6 +729,9 @@ void setup() {
   inicializarDHT22();
   inicializarSensorUV();
   
+  // Inicializar SD Card
+  inicializarCartaoSD();
+  
   // Conectar WiFi
   inicializarWiFi();
   
@@ -582,6 +764,10 @@ void setup() {
   Serial.println("GET /umidade/dht22       - Lê umidade (DHT22)");
   Serial.println("\n--- UV (GUVA-S12SD) ---");
   Serial.println("GET /uv                  - Lê radiação UV (índice + valor)");
+  Serial.println("\n--- SD Card ---");
+  Serial.println("GET /sd/status           - Status do cartão SD");
+  Serial.println("GET /sd/listar           - Lista arquivo do SD");
+  Serial.println("GET /sd/deletar          - Deleta arquivo do SD");
   Serial.println("\n--- Controle ---");
   Serial.println("GET /pwm                 - Controle PWM");
   Serial.println("GET /gpio                - Controle GPIO genérico");
@@ -604,5 +790,7 @@ void loop() {
     lerSensorUV();
   }
   
-  delay(10);
+  // Gravar dados no SD Card a cada 30 segundos
+  gravarDadosSD();
+  
 }
