@@ -20,11 +20,21 @@
 #include <SD.h>
 #include <SPI.h>
 #include <time.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 
 // ==================== CONFIGURAÇÕES DE REDE ====================
-const char* ssid = "SEU_SSID";           // Altere para seu WiFi
-const char* password = "SUA_SENHA";      // Altere para sua senha WiFi
+const char* ssid = "NecroSENSE";          // Altere para seu WiFi
+const char* password = "12345678";        // Altere para sua senha WiFi
 const int PORT = 80;
+
+// ==================== CONFIGURAÇÕES BLE ====================
+#define BLE_DEVICE_NAME "ESP32_BLE_001"
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_TX   "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define CHARACTERISTIC_RX   "beb5483e-36e1-4688-b7f5-ea07361b26a9"
 
 // ==================== CONFIGURAÇÕES DE HARDWARE ====================
 #define LED_PIN 2           // LED em GPIO 2
@@ -47,12 +57,25 @@ WebServer server(PORT);
 Adafruit_BME280 bme280;
 DHT dht22(DHT22_PIN, DHTTYPE);
 
+// BLE
+BLEServer* pServer = NULL;
+BLECharacteristic* pTxCharacteristic;
+BLECharacteristic* pRxCharacteristic;
+bool bleDeviceConnected = false;
+bool bleOldDeviceConnected = false;
+
+// LED Blink
+unsigned long ultimoBlink = 0;
+bool ledBlinkState = false;
+const unsigned long INTERVALO_BLINK = 500; // Pisca a cada 500ms
+
 // Estados dos periféricos
 struct Estado {
   bool led = false;
   bool rele1 = false;
   bool rele2 = false;
   // BME280
+  bool bme280Disponivel = false;
   float temperatura_bme280 = 0.0;
   float umidade_bme280 = 0.0;
   float pressao = 0.0;
@@ -78,6 +101,36 @@ struct Estado {
 Estado estado;
 unsigned long tempoConexao = 0;
 const unsigned long TIMEOUT_CONEXAO = 20000; // Timeout de 20 segundos
+
+// ==================== CALLBACKS BLE ====================
+// Forward declarations
+void processarComandoBLE(String comando);
+void enviarRespostaBLE(String mensagem);
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        bleDeviceConnected = true;
+        Serial.println("[BLE] Cliente BLE conectado!");
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+        bleDeviceConnected = false;
+        Serial.println("[BLE] Cliente BLE desconectado!");
+    }
+};
+
+class MyBLECallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        String rxValue = pCharacteristic->getValue();
+        
+        if (rxValue.length() > 0) {
+            Serial.print("[BLE] Recebido: ");
+            Serial.println(rxValue);
+            
+            processarComandoBLE(rxValue);
+        }
+    }
+};
 
 // ==================== FUNCÇÕES AUXILIARES ====================
 
@@ -145,9 +198,11 @@ void inicializarBME280() {
     Serial.println("  SCL -> GPIO 22");
     Serial.println("  VCC -> 3.3V");
     Serial.println("  GND -> GND");
-    while (1) delay(10);
+    Serial.println("⚠ Continuando sem BME280...");
+    return;
   }
   
+  estado.bme280Disponivel = true;
   Serial.println("✓ BME280 inicializado com sucesso!");
   
   // Configurar o sensor para modo normal
@@ -393,28 +448,28 @@ void configurarRotas() {
   // Leitura de umidade BME280
   server.on("/umidade", HTTP_GET, []() {
     lerSensoresBME280();
-    String response = "{\"status\":\"ok\",\"sensor\":\"BME280\",\"umidade\":\" + String(estado.umidade_bme280, 2) + ",\"unidade\":\"%\"}";
+    String response = "{\"status\":\"ok\",\"sensor\":\"BME280\",\"umidade\":" + String(estado.umidade_bme280, 2) + ",\"unidade\":\"%\"}";
     enviarJSON(response);
   });
   
   // Leitura de pressão
   server.on("/pressao", HTTP_GET, []() {
     lerSensoresBME280();
-    String response = "{\"status\":\"ok\",\"pressao\":\" + String(estado.pressao, 2) + ",\"unidade\":\"hPa\"}";
+    String response = "{\"status\":\"ok\",\"pressao\":" + String(estado.pressao, 2) + ",\"unidade\":\"hPa\"}";
     enviarJSON(response);
   });
   
   // Leitura de temperatura DHT22
   server.on("/temperatura/dht22", HTTP_GET, []() {
     lerSensoresDHT22();
-    String response = "{\"status\":\"ok\",\"sensor\":\"DHT22\",\"temperatura\":\" + String(estado.temperatura_dht22, 2) + ",\"unidade\":\"°C\"}";
+    String response = "{\"status\":\"ok\",\"sensor\":\"DHT22\",\"temperatura\":" + String(estado.temperatura_dht22, 2) + ",\"unidade\":\"°C\"}";
     enviarJSON(response);
   });
   
   // Leitura de umidade DHT22
   server.on("/umidade/dht22", HTTP_GET, []() {
     lerSensoresDHT22();
-    String response = "{\"status\":\"ok\",\"sensor\":\"DHT22\",\"umidade\":\" + String(estado.umidade_dht22, 2) + ",\"unidade\":\"%\"}";
+    String response = "{\"status\":\"ok\",\"sensor\":\"DHT22\",\"umidade\":" + String(estado.umidade_dht22, 2) + ",\"unidade\":\"%\"}";
     enviarJSON(response);
   });  
   // Leitura de UV
@@ -652,6 +707,7 @@ void desligarRele(int numero) {
  * Leitura de temperatura, umidade e pressão do BME280
  */
 void lerSensoresBME280() {
+  if (!estado.bme280Disponivel) return;
   if (millis() - estado.ultimaLeituraTemp >= estado.INTERVALO_LEITURA) {
     estado.temperatura_bme280 = bme280.readTemperature();
     estado.umidade_bme280 = bme280.readHumidity();
@@ -757,6 +813,162 @@ void verificarConexaoWiFi() {
   }
 }
 
+// ==================== BLE ====================
+
+/**
+ * Inicializa o servidor BLE
+ */
+void inicializarBLE() {
+  Serial.println("\n=== INICIALIZANDO BLE ===");
+  
+  BLEDevice::init(BLE_DEVICE_NAME);
+  
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+  
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  
+  // TX: ESP32 -> App (Read + Notify)
+  pTxCharacteristic = pService->createCharacteristic(
+      CHARACTERISTIC_TX,
+      BLECharacteristic::PROPERTY_READ |
+      BLECharacteristic::PROPERTY_NOTIFY
+  );
+  pTxCharacteristic->addDescriptor(new BLE2902());
+  
+  // RX: App -> ESP32 (Write)
+  pRxCharacteristic = pService->createCharacteristic(
+      CHARACTERISTIC_RX,
+      BLECharacteristic::PROPERTY_WRITE |
+      BLECharacteristic::PROPERTY_WRITE_NR
+  );
+  pRxCharacteristic->setCallbacks(new MyBLECallbacks());
+  
+  pService->start();
+  
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+  
+  Serial.println("✓ BLE iniciado!");
+  Serial.print("  Nome: ");
+  Serial.println(BLE_DEVICE_NAME);
+  Serial.println("  Aguardando conexões BLE...");
+}
+
+/**
+ * Processa comandos recebidos via BLE
+ */
+void processarComandoBLE(String comando) {
+  comando.trim();
+  comando.toUpperCase();
+  
+  String resposta = "";
+  
+  if (comando == "LED_ON" || comando == "LED:ON") {
+    ligarLED();
+    resposta = "LED ligado";
+  }
+  else if (comando == "LED_OFF" || comando == "LED:OFF") {
+    desligarLED();
+    resposta = "LED desligado";
+  }
+  else if (comando == "LED_TOGGLE" || comando == "LED:TOGGLE") {
+    estado.led = !estado.led;
+    digitalWrite(LED_PIN, estado.led ? HIGH : LOW);
+    resposta = estado.led ? "LED ligado" : "LED desligado";
+  }
+  else if (comando == "RELE1_ON") {
+    ligarRele(1);
+    resposta = "Rele 1 ligado";
+  }
+  else if (comando == "RELE1_OFF") {
+    desligarRele(1);
+    resposta = "Rele 1 desligado";
+  }
+  else if (comando == "RELE2_ON") {
+    ligarRele(2);
+    resposta = "Rele 2 ligado";
+  }
+  else if (comando == "RELE2_OFF") {
+    desligarRele(2);
+    resposta = "Rele 2 desligado";
+  }
+  else if (comando == "GET_STATUS" || comando == "STATUS") {
+    lerSensoresBME280();
+    lerSensoresDHT22();
+    lerSensorUV();
+    resposta = "LED:" + String(estado.led) + 
+               ",R1:" + String(estado.rele1) + 
+               ",R2:" + String(estado.rele2) +
+               ",T_BME:" + String(estado.temperatura_bme280, 1) +
+               ",U_BME:" + String(estado.umidade_bme280, 1) +
+               ",P:" + String(estado.pressao, 1) +
+               ",T_DHT:" + String(estado.temperatura_dht22, 1) +
+               ",U_DHT:" + String(estado.umidade_dht22, 1) +
+               ",UV:" + String(estado.indiceUV, 1);
+  }
+  else if (comando == "GET_SENSORS" || comando == "SENSORES") {
+    lerSensoresBME280();
+    lerSensoresDHT22();
+    lerSensorUV();
+    resposta = "TEMP:" + String(estado.temperatura_bme280, 1) + 
+               ",UMID:" + String(estado.umidade_bme280, 1) +
+               ",PRESS:" + String(estado.pressao, 1) +
+               ",TEMP2:" + String(estado.temperatura_dht22, 1) +
+               ",UMID2:" + String(estado.umidade_dht22, 1) +
+               ",UV:" + String(estado.indiceUV, 1);
+  }
+  else {
+    resposta = "Comando desconhecido: " + comando;
+  }
+  
+  enviarRespostaBLE(resposta);
+}
+
+/**
+ * Envia resposta via BLE
+ */
+void enviarRespostaBLE(String mensagem) {
+  if (bleDeviceConnected) {
+    pTxCharacteristic->setValue(mensagem.c_str());
+    pTxCharacteristic->notify();
+    Serial.print("[BLE] Enviado: ");
+    Serial.println(mensagem);
+  }
+}
+
+/**
+ * Gerencia reconexão BLE
+ */
+void gerenciarBLE() {
+  // Reconectar advertising se desconectou
+  if (!bleDeviceConnected && bleOldDeviceConnected) {
+    delay(100);
+    pServer->startAdvertising();
+    Serial.println("[BLE] Aguardando nova conexão BLE...");
+    bleOldDeviceConnected = bleDeviceConnected;
+  }
+  
+  if (bleDeviceConnected && !bleOldDeviceConnected) {
+    bleOldDeviceConnected = bleDeviceConnected;
+  }
+}
+
+/**
+ * Pisca o LED azul para indicar que está funcionando
+ */
+void piscarLED() {
+  if (millis() - ultimoBlink >= INTERVALO_BLINK) {
+    ultimoBlink = millis();
+    ledBlinkState = !ledBlinkState;
+    digitalWrite(LED_PIN, ledBlinkState ? HIGH : LOW);
+  }
+}
+
 // ==================== SETUP ====================
 void setup() {
   Serial.begin(115200);
@@ -774,8 +986,11 @@ void setup() {
   
   Serial.println("\n\n╔════════════════════════════════════╗");
   Serial.println("║   NecroSENSE - Controlador ESP32   ║");
-  Serial.println("║   WiFi HTTP + BME280 + DHT22 + UV    ║");
+  Serial.println("║  WiFi + BLE + BME280 + DHT22 + UV   ║");
   Serial.println("╚════════════════════════════════════════╝");
+  
+  // Inicializar BLE (antes do WiFi)
+  inicializarBLE();
   
   // Inicializar sensores
   inicializarBME280();
@@ -824,10 +1039,19 @@ void setup() {
   Serial.println("\n--- Controle ---");
   Serial.println("GET /pwm                 - Controle PWM");
   Serial.println("GET /gpio                - Controle GPIO genérico");
+  Serial.println("\n--- BLE ---");
+  Serial.println("Dispositivo BLE: ESP32_BLE_001");
+  Serial.println("LED azul piscando = funcionando");
 }
 
 // ==================== LOOP ====================
 void loop() {
+  // Piscar LED azul para indicar funcionamento
+  piscarLED();
+  
+  // Gerenciar BLE (reconexão)
+  gerenciarBLE();
+  
   // Verificar conexão WiFi
   verificarConexaoWiFi();
   

@@ -48,14 +48,7 @@ public class BLEControlViewModel : BaseViewModel
     public DispositivoBLE? DispositivoSelecionado
     {
         get => _dispositivoSelecionado;
-        set 
-        { 
-            if (SetProperty(ref _dispositivoSelecionado, value) && value != null)
-            {
-                // Conectar automaticamente quando selecionar um dispositivo
-                MainThread.BeginInvokeOnMainThread(async () => await ConectarToggleAsync());
-            }
-        }
+        set => SetProperty(ref _dispositivoSelecionado, value);
     }
     
     public ObservableCollection<DispositivoBLE> Dispositivos
@@ -191,16 +184,37 @@ public class BLEControlViewModel : BaseViewModel
     
     private async Task SelecionarDispositivoAsync(DispositivoBLE device)
     {
-        if (device == null) return;
+        if (device == null || IsBusy) return;
         
-        DispositivoSelecionado = device;
-        Resposta = $"Conectando a {device.Nome}...";
+        IsBusy = true;
         
-        var conectado = await _bleService.ConectarAsync(device.Id);
-        
-        Resposta = conectado 
-            ? $"✅ Conectado a {device.Nome}" 
-            : $"❌ Falha ao conectar em {device.Nome}";
+        try
+        {
+            // Se já conectado, desconectar primeiro
+            if (Conectado)
+            {
+                await _bleService.DesconectarAsync();
+                Conectado = false;
+            }
+            
+            DispositivoSelecionado = device;
+            Resposta = $"Conectando a {device.Nome}...";
+            
+            var conectado = await _bleService.ConectarAsync(device.Id);
+            
+            Resposta = conectado 
+                ? $"✅ Conectado a {device.Nome}" 
+                : $"❌ Falha ao conectar em {device.Nome}";
+        }
+        catch (Exception ex)
+        {
+            Resposta = $"❌ Erro: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[BLE] Erro ao selecionar dispositivo: {ex.Message}");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
     
     private async Task EnviarComandoCustomAsync()

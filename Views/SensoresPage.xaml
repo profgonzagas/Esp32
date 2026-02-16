@@ -14,10 +14,16 @@
                 <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="10">
                     <Label Text="Modo de Conexão" FontAttributes="Bold" />
                     <Switch Grid.Column="1" IsToggled="{Binding UsarWiFi}" />
-                    <Label Grid.Row="1" Text="{Binding UsarWiFi, StringFormat='Usando: {0}'}" 
+                    <Label Grid.Row="1" Text="{Binding ModoTexto}" 
                            TextColor="{StaticResource Primary}" FontSize="12"/>
                 </Grid>
             </Frame>
+            
+            <!-- Status de feedback -->
+            <Label Text="{Binding StatusMensagem}" 
+                   FontSize="13" 
+                   HorizontalOptions="Center"
+                   TextColor="{AppThemeBinding Light=#555555, Dark=#CCCCCC}"/>
             
             <!-- Botões de Controle -->
             <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
