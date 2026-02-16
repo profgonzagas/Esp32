@@ -99,9 +99,32 @@ void inicializarSensorUV() {
 void inicializarDHT22() {
   Serial.println("\n=== INICIALIZANDO DHT22 ===");
   dht22.begin();
-  delay(100);
-  Serial.println("✓ DHT22 inicializado com sucesso!");
-  Serial.println("  Pino: GPIO 4");
+  delay(500);
+  
+  // Fazer leitura de teste
+  float testTemp = dht22.readTemperature();
+  float testUmid = dht22.readHumidity();
+  
+  if (!isnan(testTemp) && !isnan(testUmid)) {
+    estado.temperatura_dht22 = testTemp;
+    estado.umidade_dht22 = testUmid;
+    Serial.println("✓ DHT22 inicializado com sucesso!");
+    Serial.print("  Pino: GPIO 4");
+    Serial.print(" | Temp: ");
+    Serial.print(testTemp, 1);
+    Serial.print("°C | Umid: ");
+    Serial.print(testUmid, 1);
+    Serial.println("%");
+  } else {
+    Serial.println("⚠ DHT22 inicializado mas primeira leitura falhou");
+    Serial.println("  Verifique:");
+    Serial.println("  - Conexão no GPIO 4");
+    Serial.println("  - Resistor pull-up 4.7kΩ entre GPIO 4 e 3.3V");
+    Serial.println("  - Voltagem 3.3V");
+    // Inicializa com valores padrão
+    estado.temperatura_dht22 = 0.0;
+    estado.umidade_dht22 = 0.0;
+  }
 }
 
 /**
@@ -134,6 +157,20 @@ void inicializarBME280() {
                      Adafruit_BME280::SAMPLING_X2,  // umidade
                      Adafruit_BME280::FILTER_X16,
                      Adafruit_BME280::STANDBY_MS_0_5);
+  
+  // Fazer leitura de teste
+  delay(100);
+  float testTemp = bme280.readTemperature();
+  float testUmid = bme280.readHumidity();
+  float testPress = bme280.readPressure() / 100.0F;
+  
+  Serial.print("  Teste - T: ");
+  Serial.print(testTemp, 1);
+  Serial.print("°C | U: ");
+  Serial.print(testUmid, 1);
+  Serial.print("% | P: ");
+  Serial.print(testPress, 1);
+  Serial.println("hPa");
   
   Serial.println("✓ Sensor configurado em modo normal");
 }
@@ -645,13 +682,29 @@ void lerSensoresDHT22() {
       estado.temperatura_dht22 = temp;
       estado.umidade_dht22 = umid;
       
-      Serial.print("[DHT22] 🌡 Temperatura: ");
+      Serial.print("[DHT22] ✓ Temperatura: ");
       Serial.print(estado.temperatura_dht22, 1);
       Serial.print(" °C | 💧 Umidade: ");
       Serial.print(estado.umidade_dht22, 1);
       Serial.println(" %");
     } else {
-      Serial.println("[DHT22] ✗ Erro na leitura do DHT22");
+      // Se erro, tenta novamente em 2 segundos (não espera 30s)
+      Serial.print("[DHT22] ⚠ Falha na leitura | Tentando novamente...");
+      delay(2000);
+      temp = dht22.readTemperature();
+      umid = dht22.readHumidity();
+      
+      if (!isnan(temp) && !isnan(umid)) {
+        estado.temperatura_dht22 = temp;
+        estado.umidade_dht22 = umid;
+        Serial.print(" ✓ OK! T: ");
+        Serial.print(estado.temperatura_dht22, 1);
+        Serial.print("°C U: ");
+        Serial.print(estado.umidade_dht22, 1);
+        Serial.println("%");
+      } else {
+        Serial.println(" ✗ Erro persistente - Verifique conexão GPIO 4");
+      }
     }
     
     estado.ultimaLeituraDHT22 = millis();
@@ -783,11 +836,26 @@ void loop() {
   
   // Atualizar leituras periódicas
   static unsigned long ultimaLeitura = 0;
+  static int tentativasDHT22 = 0;
+  
   if (millis() - ultimaLeitura >= 1000) {
     ultimaLeitura = millis();
     lerSensoresBME280();
-    lerSensoresDHT22();
     lerSensorUV();
+    
+    // DHT22: tentar ler a cada 1 segundo até conseguir, depois a cada 30 segundos
+    if (estado.temperatura_dht22 == 0.0 || estado.umidade_dht22 == 0.0) {
+      // Ainda não conseguiu leitura válida, tenta mais frequentemente
+      if (tentativasDHT22 < 30) {
+        lerSensoresDHT22();
+        tentativasDHT22++;
+      }
+    } else {
+      // Já tem leitura válida, respeita intervalo de 30s
+      if (millis() - estado.ultimaLeituraDHT22 >= estado.INTERVALO_DHT22) {
+        lerSensoresDHT22();
+      }
+    }
   }
   
   // Gravar dados no SD Card a cada 30 segundos

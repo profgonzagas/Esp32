@@ -67,7 +67,7 @@
                     
                     <!-- Informações adicionais sobre pressão -->
                     <Frame CornerRadius="8" Padding="10" BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#2A3A5F}" 
-                           Margin="0,10,0,0" BorderColor="#FF9800" BorderWidth="1">
+                           Margin="0,10,0,0" BorderColor="#FF9800">
                         <Label Text="✓ Sensor de alta precisão 3.3V - Ideal para medições atmosféricas precisas" 
                                FontSize="11" Opacity="0.8" LineBreakMode="WordWrap"/>
                     </Frame>
@@ -100,7 +100,7 @@
                     
                     <!-- Informações adicionais DHT22 -->
                     <Frame CornerRadius="8" Padding="10" BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#2A3A5F}" 
-                           Margin="0,10,0,0" BorderColor="#4CAF50" BorderWidth="1">
+                           Margin="0,10,0,0" BorderColor="#4CAF50">
                         <Label Text="✓ Sensor digital econômico - Ótimo custo-benefício para medições de umidade/temperatura" 
                                FontSize="11" Opacity="0.8" LineBreakMode="WordWrap"/>
                     </Frame>
@@ -136,7 +136,7 @@
                     
                     <!-- Escala de UV -->
                     <Frame CornerRadius="8" Padding="10" BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#2A3A5F}" 
-                           Margin="0,10,0,0" BorderColor="#FF9800" BorderWidth="1">
+                           Margin="0,10,0,0" BorderColor="#FF9800">
                         <VerticalStackLayout Spacing="5">
                             <Label Text="Escala UV:" FontSize="10" FontAttributes="Bold" Opacity="0.7"/>
                             <Grid ColumnDefinitions="30,30,30,30,30" ColumnSpacing="2">
