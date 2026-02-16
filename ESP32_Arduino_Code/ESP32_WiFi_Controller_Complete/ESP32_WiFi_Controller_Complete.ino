@@ -37,7 +37,8 @@ const int PORT = 80;
 #define CHARACTERISTIC_RX   "beb5483e-36e1-4688-b7f5-ea07361b26a9"
 
 // ==================== CONFIGURAÇÕES DE HARDWARE ====================
-#define LED_PIN 2           // LED em GPIO 2
+#define LED_INTERNO 2       // LED interno (pisca automático)
+#define LED_PIN 13          // LED externo (controle manual)
 #define RELE1_PIN 26        // Relé 1 em GPIO 26
 #define RELE2_PIN 27        // Relé 2 em GPIO 27
 #define SDA_PIN 21          // I2C SDA para BME280
@@ -80,9 +81,11 @@ struct Estado {
   float umidade_bme280 = 0.0;
   float pressao = 0.0;
   // DHT22
+  bool dht22Disponivel = false;
   float temperatura_dht22 = 0.0;
   float umidade_dht22 = 0.0;
   // UV - GUVA-S12SD
+  bool uvDisponivel = false;
   int nivelUV = 0;           // 0-1023 (valor analógico)
   float indiceUV = 0.0;      // Índice UV calculado (0-15)
   unsigned long ultimaLeituraUV = 0;
@@ -141,9 +144,20 @@ void inicializarSensorUV() {
   Serial.println("\n=== INICIALIZANDO SENSOR UV ===");
   pinMode(UV_PIN, INPUT);
   delay(100);
-  Serial.println("✓ Sensor UV inicializado com sucesso!");
-  Serial.println("  Pino: GPIO 34 (Analógico)");
-  Serial.println("  Faixa: 0-1023 (ADC 12-bit)");
+  
+  // Teste de leitura
+  int testUV = analogRead(UV_PIN);
+  if (testUV >= 0) {
+    estado.uvDisponivel = true;
+    Serial.println("✓ Sensor UV inicializado com sucesso!");
+    Serial.println("  Pino: GPIO 34 (Analógico)");
+    Serial.println("  Faixa: 0-1023 (ADC 12-bit)");
+    Serial.print("  Leitura teste: ");
+    Serial.println(testUV);
+  } else {
+    Serial.println("⚠ Sensor UV não respondeu");
+    estado.uvDisponivel = false;
+  }
 }
 
 /**
@@ -159,6 +173,7 @@ void inicializarDHT22() {
   float testUmid = dht22.readHumidity();
   
   if (!isnan(testTemp) && !isnan(testUmid)) {
+    estado.dht22Disponivel = true;
     estado.temperatura_dht22 = testTemp;
     estado.umidade_dht22 = testUmid;
     Serial.println("✓ DHT22 inicializado com sucesso!");
@@ -174,7 +189,8 @@ void inicializarDHT22() {
     Serial.println("  - Conexão no GPIO 4");
     Serial.println("  - Resistor pull-up 4.7kΩ entre GPIO 4 e 3.3V");
     Serial.println("  - Voltagem 3.3V");
-    // Inicializa com valores padrão
+    Serial.println("⚠ Continuando sem DHT22...");
+    estado.dht22Disponivel = false;
     estado.temperatura_dht22 = 0.0;
     estado.umidade_dht22 = 0.0;
   }
@@ -237,18 +253,25 @@ void inicializarCartaoSD() {
   Serial.println("\n=== INICIALIZANDO CARTÃO SD ===");
   
   // Configurar pinos SPI
+  Serial.println("Configurando SPI...");
   SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+  delay(100);
   
-  // Inicializar SD
-  if (!SD.begin(SD_CS_PIN)) {
+  // Tentar inicializar SD com velocidade baixa (4MHz para maior compatibilidade)
+  Serial.println("Tentando inicializar SD Card (4MHz)...");
+  if (!SD.begin(SD_CS_PIN, SPI, 4000000)) {
     Serial.println("✗ Falha ao inicializar cartão SD!");
-    Serial.println("Verifique as conexões:");
-    Serial.println("  CS   -> GPIO 5");
-    Serial.println("  CLK  -> GPIO 18 (SCK)");
-    Serial.println("  MOSI -> GPIO 23 (DI/DIN)");
-    Serial.println("  MISO -> GPIO 19 (DO/DOUT)");
-    Serial.println("  VCC  -> 3.3V");
-    Serial.println("  GND  -> GND");
+    Serial.println("Possíveis causas:");
+    Serial.println("  1. Cartão não formatado em FAT32");
+    Serial.println("  2. Cartão não inserido ou mal encaixado");
+    Serial.println("  3. Conexões incorretas:");
+    Serial.println("     CS   -> GPIO 5");
+    Serial.println("     CLK  -> GPIO 18 (SCK)");
+    Serial.println("     MOSI -> GPIO 23 (DI/DIN)");
+    Serial.println("     MISO -> GPIO 19 (DO/DOUT)");
+    Serial.println("     VCC  -> 3.3V");
+    Serial.println("     GND  -> GND");
+    Serial.println("  4. Cartão SD danificado");
     estado.cartaoSDconectado = false;
     return;
   }
@@ -256,9 +279,29 @@ void inicializarCartaoSD() {
   estado.cartaoSDconectado = true;
   Serial.println("✓ Cartão SD inicializado com sucesso!");
   
+  uint8_t cardType = SD.cardType();
+  Serial.print("Tipo do cartão: ");
+  if (cardType == CARD_MMC) {
+    Serial.println("MMC");
+  } else if (cardType == CARD_SD) {
+    Serial.println("SDSC");
+  } else if (cardType == CARD_SDHC) {
+    Serial.println("SDHC");
+  } else {
+    Serial.println("DESCONHECIDO");
+  }
+  
   uint64_t cardSize = SD.cardSize() / (1024 * 1024);
   Serial.print("Tamanho do cartão: ");
   Serial.print(cardSize);
+  Serial.println(" MB");
+  
+  uint64_t totalBytes = SD.totalBytes() / (1024 * 1024);
+  uint64_t usedBytes = SD.usedBytes() / (1024 * 1024);
+  Serial.print("Total: ");
+  Serial.print(totalBytes);
+  Serial.print(" MB | Usado: ");
+  Serial.print(usedBytes);
   Serial.println(" MB");
   
   // Criar arquivo de cabeçalho
@@ -299,13 +342,20 @@ void gravarDadosSD() {
   
   // Procurar arquivo mais recente
   File raiz = SD.open("/");
+  if (!raiz) {
+    Serial.println("[SD_CARD] ⚠ Erro ao abrir diretório raiz");
+    estado.cartaoSDconectado = false;
+    return;
+  }
+  
   File arquivo;
   String nomeArquivo = "";
   
   arquivo = raiz.openNextFile();
   while (arquivo) {
     String nome = arquivo.name();
-    if (nome.endsWith(".csv")) {
+    // Verificar se arquivo termina com .csv
+    if (nome.length() > 4 && nome.substring(nome.length() - 4) == ".csv") {
       nomeArquivo = "/" + nome;
     }
     arquivo.close();
@@ -314,6 +364,7 @@ void gravarDadosSD() {
   raiz.close();
   
   if (nomeArquivo == "") {
+    Serial.println("[SD_CARD] ⚠ Nenhum arquivo CSV encontrado, criando...");
     criarArquivoCSV();
     return;
   }
@@ -340,9 +391,11 @@ void gravarDadosSD() {
     arquivo.println(linha);
     arquivo.close();
     
-    Serial.println("[SD_CARD] Dados gravados com sucesso");
+    Serial.print("[SD_CARD] ✓ Dados gravados em: ");
+    Serial.println(nomeArquivo);
   } else {
-    Serial.println("[SD_CARD] Erro ao abrir arquivo");
+    Serial.print("[SD_CARD] ✗ Erro ao abrir arquivo: ");
+    Serial.println(nomeArquivo);
     estado.cartaoSDconectado = false;
   }
 }
@@ -707,7 +760,16 @@ void desligarRele(int numero) {
  * Leitura de temperatura, umidade e pressão do BME280
  */
 void lerSensoresBME280() {
-  if (!estado.bme280Disponivel) return;
+  // Se não está disponível, tentar reconectar uma vez
+  if (!estado.bme280Disponivel) {
+    if (!bme280.begin(BME280_ADDRESS)) {
+      Serial.println("[BME280] ⚠ Sensor não está disponível");
+      return;
+    }
+    Serial.println("[BME280] ✓ Reconectado!");
+    estado.bme280Disponivel = true;
+  }
+  
   if (millis() - estado.ultimaLeituraTemp >= estado.INTERVALO_LEITURA) {
     estado.temperatura_bme280 = bme280.readTemperature();
     estado.umidade_bme280 = bme280.readHumidity();
@@ -729,6 +791,24 @@ void lerSensoresBME280() {
  * Leitura de temperatura e umidade do DHT22
  */
 void lerSensoresDHT22() {
+  // Se não está disponível, tentar reconectar
+  if (!estado.dht22Disponivel) {
+    dht22.begin();
+    delay(500);
+    float t = dht22.readTemperature();
+    float u = dht22.readHumidity();
+    if (!isnan(t) && !isnan(u)) {
+      Serial.println("[DHT22] ✓ Reconectado!");
+      estado.dht22Disponivel = true;
+      estado.temperatura_dht22 = t;
+      estado.umidade_dht22 = u;
+      estado.ultimaLeituraDHT22 = millis();
+    } else {
+      Serial.println("[DHT22] ⚠ Sensor não está disponível");
+    }
+    return;
+  }
+  
   if (millis() - estado.ultimaLeituraDHT22 >= estado.INTERVALO_DHT22) {
     float temp = dht22.readTemperature();
     float umid = dht22.readHumidity();
@@ -771,6 +851,20 @@ void lerSensoresDHT22() {
  * Leitura de radiação UV do sensor GUVA-S12SD
  */
 void lerSensorUV() {
+  // Se não está disponível, tentar reconectar
+  if (!estado.uvDisponivel) {
+    pinMode(UV_PIN, INPUT);
+    delay(50);
+    int testUV = analogRead(UV_PIN);
+    if (testUV >= 0) {
+      Serial.println("[UV] ✓ Reconectado!");
+      estado.uvDisponivel = true;
+    } else {
+      Serial.println("[UV] ⚠ Sensor não está disponível");
+      return;
+    }
+  }
+  
   if (millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
     // Ler valor analógico do sensor (0-1023)
     estado.nivelUV = analogRead(UV_PIN);
@@ -922,6 +1016,49 @@ void processarComandoBLE(String comando) {
                ",UMID2:" + String(estado.umidade_dht22, 1) +
                ",UV:" + String(estado.indiceUV, 1);
   }
+  else if (comando == "DIAGNOSTICO") {
+    resposta = "BME280:" + String(estado.bme280Disponivel ? "OK" : "ERRO") +
+               ",DHT22:" + String(estado.dht22Disponivel ? "OK" : "ERRO") +
+               ",UV:" + String(estado.uvDisponivel ? "OK" : "ERRO") +
+               ",LED:" + String(estado.led ? "ON" : "OFF") +
+               ",R1:" + String(estado.rele1 ? "ON" : "OFF") +
+               ",R2:" + String(estado.rele2 ? "ON" : "OFF");
+  }
+  else if (comando == "SD_STATUS") {
+    // Lista arquivos no SD
+    File raiz = SD.open("/");
+    if (!raiz) {
+      resposta = "SD_STATUS:Erro ao abrir SD";
+    } else {
+      resposta = "SD_STATUS:";
+      if (estado.cartaoSDconectado) {
+        resposta += "Conectado,Arquivos:";
+        File arquivo;
+        arquivo = raiz.openNextFile();
+        while (arquivo) {
+          resposta += arquivo.name();
+          resposta += "|";
+          arquivo.close();
+          arquivo = raiz.openNextFile();
+        }
+      } else {
+        resposta += "Desconectado";
+      }
+      raiz.close();
+    }
+  }
+  else if (comando == "SD_GRAVAR") {
+    // Forçar gravação imediata
+    estado.ultimaGravagemSD = 0;  // Resetar timer
+    gravarDadosSD();
+    resposta = estado.cartaoSDconectado ? "SD_GRAVAR:OK" : "SD_GRAVAR:Erro";
+  }
+  else if (comando == "SD_INIT") {
+    // Tentar reinicializar SD Card
+    Serial.println("\n[BLE] Reinicializando SD Card...");
+    inicializarCartaoSD();
+    resposta = estado.cartaoSDconectado ? "SD_INIT:OK,Conectado" : "SD_INIT:ERRO,Falhou";
+  }
   else {
     resposta = "Comando desconhecido: " + comando;
   }
@@ -959,13 +1096,13 @@ void gerenciarBLE() {
 }
 
 /**
- * Pisca o LED azul para indicar que está funcionando
+ * Pisca o LED interno para indicar que está funcionando
  */
 void piscarLED() {
   if (millis() - ultimoBlink >= INTERVALO_BLINK) {
     ultimoBlink = millis();
     ledBlinkState = !ledBlinkState;
-    digitalWrite(LED_PIN, ledBlinkState ? HIGH : LOW);
+    digitalWrite(LED_INTERNO, ledBlinkState ? HIGH : LOW);
   }
 }
 
@@ -975,11 +1112,13 @@ void setup() {
   delay(100);
   
   // Configurar pinos
-  pinMode(LED_PIN, OUTPUT);
+  pinMode(LED_INTERNO, OUTPUT);  // LED interno (pisca)
+  pinMode(LED_PIN, OUTPUT);       // LED externo (controle manual)
   pinMode(RELE1_PIN, OUTPUT);
   pinMode(RELE2_PIN, OUTPUT);
   
   // Estado inicial LOW (desligado)
+  digitalWrite(LED_INTERNO, LOW);
   digitalWrite(LED_PIN, LOW);
   digitalWrite(RELE1_PIN, LOW);
   digitalWrite(RELE2_PIN, LOW);

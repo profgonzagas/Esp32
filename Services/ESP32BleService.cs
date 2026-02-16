@@ -321,7 +321,10 @@ public class ESP32BleService
     public async Task<bool> EnviarDadosAsync(string dados)
     {
         if (!_isConnected || _rxCharacteristic == null) 
+        {
+            System.Diagnostics.Debug.WriteLine("[BLE] Não conectado ou RX null");
             return false;
+        }
         
         try
         {
@@ -330,7 +333,7 @@ public class ESP32BleService
             // Enviar dados via BLE (escrever na característica RX do ESP32)
             await _rxCharacteristic.WriteAsync(bytes);
             
-            System.Diagnostics.Debug.WriteLine($"[BLE] TX→RX: {dados}");
+            System.Diagnostics.Debug.WriteLine($"[BLE] Enviado ({bytes.Length} bytes): {dados.Trim()}");
             return true;
         }
         catch (Exception ex)
@@ -338,6 +341,51 @@ public class ESP32BleService
             System.Diagnostics.Debug.WriteLine($"[BLE] Erro ao enviar: {ex.Message}");
             return false;
         }
+    }
+    
+    /// <summary>
+    /// Envia um comando e tenta ler a resposta diretamente da característica TX.
+    /// Fallback para quando as notificações BLE não funcionam.
+    /// </summary>
+    public async Task<string?> EnviarComandoComRespostaAsync(string comando, int delayMs = 500)
+    {
+        if (!_isConnected || _txCharacteristic == null || _rxCharacteristic == null)
+        {
+            System.Diagnostics.Debug.WriteLine("[BLE] Não conectado para enviar comando com resposta");
+            return null;
+        }
+        
+        try
+        {
+            // Enviar comando
+            var enviado = await EnviarDadosAsync($"{comando}\n");
+            if (!enviado) return null;
+            
+            // Dar tempo pro ESP32 processar e escrever a resposta na TX
+            await Task.Delay(delayMs);
+            
+            // Ler diretamente a característica TX (fallback se notify não funciona)
+            var result = await _txCharacteristic.ReadAsync();
+            if (result.data != null && result.data.Length > 0)
+            {
+                var resposta = Encoding.UTF8.GetString(result.data);
+                System.Diagnostics.Debug.WriteLine($"[BLE] Lido TX: {resposta}");
+                
+                // Disparar evento como se fosse notificação
+                OnMensagemRecebida?.Invoke(this, resposta);
+                return resposta;
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("[BLE] TX vazio após leitura");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[BLE] Erro em comando com resposta: {ex.Message}");
+        }
+        
+        return null;
     }
     
     public async Task<bool> EnviarComandoAsync(string comando)

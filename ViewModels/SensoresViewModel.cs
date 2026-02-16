@@ -229,6 +229,33 @@ public class SensoresViewModel : BaseViewModel
     private async Task<bool> AtualizarViaBLEAsync()
     {
         _bleResponseReceived = false;
+        
+        StatusMensagem = "📱 Enviando comando BLE...";
+        
+        // Usar método com leitura direta (mais confiável que notificações)
+        var resposta = await _bleService.EnviarComandoComRespostaAsync("GET_SENSORS", 800);
+        
+        if (resposta != null)
+        {
+            // Se resposta veio via leitura direta, processar aqui
+            if (!_bleResponseReceived)
+            {
+                var dados = ParseSensorData(resposta);
+                if (dados != null)
+                {
+                    MainThread.BeginInvokeOnMainThread(() =>
+                    {
+                        Dados = dados;
+                        StatusMensagem = "✅ Dados atualizados via BLE";
+                    });
+                    return true;
+                }
+            }
+            return _bleResponseReceived;
+        }
+        
+        // Fallback: enviar e aguardar notificação
+        StatusMensagem = "📱 Tentando via notificação...";
         var enviado = await _bleService.SolicitarSensoresAsync();
         
         if (!enviado)
@@ -236,8 +263,6 @@ public class SensoresViewModel : BaseViewModel
             StatusMensagem = "❌ Falha ao enviar comando BLE";
             return false;
         }
-        
-        StatusMensagem = "📱 Aguardando resposta BLE...";
         
         // Esperar até 3 segundos pela resposta via notificação
         for (int i = 0; i < 30 && !_bleResponseReceived; i++)
@@ -247,7 +272,7 @@ public class SensoresViewModel : BaseViewModel
         
         if (!_bleResponseReceived)
         {
-            StatusMensagem = "⚠ Sem resposta do ESP32 via BLE (timeout 3s)";
+            StatusMensagem = "⚠ ESP32 não respondeu (verifique Serial Monitor)";
             return false;
         }
         

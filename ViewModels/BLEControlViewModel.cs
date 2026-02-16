@@ -225,8 +225,21 @@ public class BLEControlViewModel : BaseViewModel
         
         try
         {
-            var sucesso = await _bleService.EnviarComandoAsync(ComandoCustom);
-            Resposta = sucesso ? $"Enviado: {ComandoCustom}" : "Falha ao enviar comando";
+            Resposta = $"Enviando: {ComandoCustom}...";
+            var resposta = await _bleService.EnviarComandoComRespostaAsync(ComandoCustom, 800);
+            
+            if (!string.IsNullOrEmpty(resposta))
+            {
+                Resposta = resposta;
+            }
+            else
+            {
+                Resposta = "⚠️ Sem resposta do ESP32";
+            }
+        }
+        catch (Exception ex)
+        {
+            Resposta = $"❌ Erro: {ex.Message}";
         }
         finally
         {
@@ -256,29 +269,30 @@ public class BLEControlViewModel : BaseViewModel
         var ajuda = """
             ℹ️ AJUDA - COMANDOS BLE
             
-            Comandos Disponíveis:
-            
-            🔌 INFORMAÇÕES:
-            • sensores - Ler todos os sensores
-            • temperatura - Temperatura
-            • umidade - Umidade
-            • gas - Concentração de gás MQ-5
-            • chama - Detector de chama
-            • som - Sensor de som KY-037
+            📊 SENSORES:
+            • GET_SENSORS - Ler todos os sensores (BME280+DHT22+UV)
+            • GET_STATUS - Status completo (sensores + LED + relés)
+            • DIAGNOSTICO - Verificar disponibilidade dos sensores
             
             💡 CONTROLE:
-            • led:on - Ligar LED
-            • led:off - Desligar LED
-            • led:toggle - Alternar LED
-            • rele1:on - Ligar Relé 1
-            • rele1:off - Desligar Relé 1
-            • rele2:on - Ligar Relé 2
-            • rele2:off - Desligar Relé 2
+            • LED_ON - Ligar LED (GPIO 13)
+            • LED_OFF - Desligar LED
+            • LED_TOGGLE - Alternar LED
+            • RELE1_ON - Ligar Relé 1 (GPIO 26)
+            • RELE1_OFF - Desligar Relé 1
+            • RELE2_ON - Ligar Relé 2 (GPIO 27)
+            • RELE2_OFF - Desligar Relé 2
+            
+            💾 CARTÃO SD:
+            • SD_STATUS - Status do SD Card + lista arquivos
+            • SD_GRAVAR - Forçar gravação imediata
+            • SD_INIT - Reinicializar SD Card
             
             Exemplos:
-            temperatura
-            led:toggle
-            rele1:on
+            GET_SENSORS
+            DIAGNOSTICO
+            LED_TOGGLE
+            SD_STATUS
             """;
         
         MainThread.BeginInvokeOnMainThread(async () =>
