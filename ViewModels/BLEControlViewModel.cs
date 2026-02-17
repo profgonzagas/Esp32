@@ -225,16 +225,16 @@ public class BLEControlViewModel : BaseViewModel
         
         try
         {
-            Resposta = $"Enviando: {ComandoCustom}...";
-            var resposta = await _bleService.EnviarComandoComRespostaAsync(ComandoCustom, 800);
+            Resposta = $"📤 Enviando: {ComandoCustom}...";
+            var resposta = await _bleService.EnviarComandoComRespostaAsync(ComandoCustom, 3000);
             
             if (!string.IsNullOrEmpty(resposta))
             {
-                Resposta = resposta;
+                Resposta = $"✅ {resposta}";
             }
             else
             {
-                Resposta = "⚠️ Sem resposta do ESP32";
+                Resposta = "⚠️ Sem resposta do ESP32 (timeout 3s)";
             }
         }
         catch (Exception ex)

@@ -232,8 +232,8 @@ public class SensoresViewModel : BaseViewModel
         
         StatusMensagem = "📱 Enviando comando BLE...";
         
-        // Usar método com leitura direta (mais confiável que notificações)
-        var resposta = await _bleService.EnviarComandoComRespostaAsync("GET_SENSORS", 800);
+        // Usar método com resposta via notificação
+        var resposta = await _bleService.EnviarComandoComRespostaAsync("GET_SENSORS", 3000);
         
         if (resposta != null)
         {

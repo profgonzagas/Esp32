@@ -17,6 +17,7 @@ public class ESP32BleService
     private ICharacteristic? _rxCharacteristic;
     private IBluetoothLE? _ble;
     private IAdapter? _adapter;
+    private TaskCompletionSource<string>? _respostaEsperada;
     
     public bool IsScanning => _isScanning;
     public bool IsConectado => _isConnected;
@@ -277,7 +278,15 @@ public class ESP32BleService
             if (e.Characteristic.Value != null)
             {
                 var mensagem = Encoding.UTF8.GetString(e.Characteristic.Value);
-                System.Diagnostics.Debug.WriteLine($"[BLE] Dados recebidos: {mensagem}");
+                System.Diagnostics.Debug.WriteLine($"[BLE] <<< Notificação recebida: {mensagem}");
+                
+                // Se estamos aguardando resposta, completar a Task
+                if (_respostaEsperada != null && !_respostaEsperada.Task.IsCompleted)
+                {
+                    _respostaEsperada.TrySetResult(mensagem);
+                }
+                
+                // Disparar evento também
                 OnMensagemRecebida?.Invoke(this, mensagem);
             }
         }
@@ -344,10 +353,9 @@ public class ESP32BleService
     }
     
     /// <summary>
-    /// Envia um comando e tenta ler a resposta diretamente da característica TX.
-    /// Fallback para quando as notificações BLE não funcionam.
+    /// Envia um comando e aguarda a resposta via notificação BLE
     /// </summary>
-    public async Task<string?> EnviarComandoComRespostaAsync(string comando, int delayMs = 500)
+    public async Task<string?> EnviarComandoComRespostaAsync(string comando, int timeoutMs = 3000)
     {
         if (!_isConnected || _txCharacteristic == null || _rxCharacteristic == null)
         {
@@ -357,32 +365,39 @@ public class ESP32BleService
         
         try
         {
+            // Criar Task para aguardar notificação
+            _respostaEsperada = new TaskCompletionSource<string>();
+            
             // Enviar comando
+            System.Diagnostics.Debug.WriteLine($"[BLE] Enviando comando: {comando}");
             var enviado = await EnviarDadosAsync($"{comando}\n");
-            if (!enviado) return null;
-            
-            // Dar tempo pro ESP32 processar e escrever a resposta na TX
-            await Task.Delay(delayMs);
-            
-            // Ler diretamente a característica TX (fallback se notify não funciona)
-            var result = await _txCharacteristic.ReadAsync();
-            if (result.data != null && result.data.Length > 0)
+            if (!enviado)
             {
-                var resposta = Encoding.UTF8.GetString(result.data);
-                System.Diagnostics.Debug.WriteLine($"[BLE] Lido TX: {resposta}");
-                
-                // Disparar evento como se fosse notificação
-                OnMensagemRecebida?.Invoke(this, resposta);
-                return resposta;
+                _respostaEsperada = null;
+                return null;
             }
-            else
+            
+            // Aguardar resposta via notificação (com timeout)
+            var timeoutTask = Task.Delay(timeoutMs);
+            var completedTask = await Task.WhenAny(_respostaEsperada.Task, timeoutTask);
+            
+            if (completedTask == timeoutTask)
             {
-                System.Diagnostics.Debug.WriteLine("[BLE] TX vazio após leitura");
+                System.Diagnostics.Debug.WriteLine($"[BLE] ⚠ Timeout aguardando resposta ({timeoutMs}ms)");
+                _respostaEsperada = null;
+                return null;
             }
+            
+            var resposta = await _respostaEsperada.Task;
+            _respostaEsperada = null;
+            
+            System.Diagnostics.Debug.WriteLine($"[BLE] ✓ Resposta recebida: {resposta}");
+            return resposta;
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[BLE] Erro em comando com resposta: {ex.Message}");
+            _respostaEsperada = null;
         }
         
         return null;

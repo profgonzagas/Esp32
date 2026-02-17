@@ -615,9 +615,11 @@ void enviarJSON(String json) {
  * Handler para status completo
  */
 void handleStatus() {
-  lerSensoresBME280();
-  lerSensoresDHT22();
-  lerSensorUV();
+  // Forçar leitura imediata de todos os sensores
+  lerSensoresBME280(true);
+  delay(100); // Delay para DHT22 processar
+  lerSensoresDHT22(true);
+  lerSensorUV(true);
   
   String json = "{";
   json += "\"status\":\"conectado\",";
@@ -645,9 +647,11 @@ void handleStatus() {
  * Handler para leitura de sensores
  */
 void handleSensores() {
-  lerSensoresBME280();
-  lerSensoresDHT22();
-  lerSensorUV();
+  // Forçar leitura imediata de todos os sensores
+  lerSensoresBME280(true);
+  delay(100); // Delay para DHT22 processar
+  lerSensoresDHT22(true);
+  lerSensorUV(true);
   
   String json = "[";
   json += "{\"nome\":\"Temperatura (BME280)\",\"valor\":" + String(estado.temperatura_bme280, 2) + ",\"unidade\":\"°C\",\"icone\":\"🌡\"},";
@@ -760,6 +764,14 @@ void desligarRele(int numero) {
  * Leitura de temperatura, umidade e pressão do BME280
  */
 void lerSensoresBME280() {
+  lerSensoresBME280(false);
+}
+
+/**
+ * Leitura de temperatura, umidade e pressão do BME280
+ * @param forcado Se true, força leitura imediata ignorando intervalo
+ */
+void lerSensoresBME280(bool forcado) {
   // Se não está disponível, tentar reconectar uma vez
   if (!estado.bme280Disponivel) {
     if (!bme280.begin(BME280_ADDRESS)) {
@@ -770,7 +782,7 @@ void lerSensoresBME280() {
     estado.bme280Disponivel = true;
   }
   
-  if (millis() - estado.ultimaLeituraTemp >= estado.INTERVALO_LEITURA) {
+  if (forcado || millis() - estado.ultimaLeituraTemp >= estado.INTERVALO_LEITURA) {
     estado.temperatura_bme280 = bme280.readTemperature();
     estado.umidade_bme280 = bme280.readHumidity();
     estado.pressao = bme280.readPressure() / 100.0F; // Converter Pa para hPa
@@ -791,6 +803,14 @@ void lerSensoresBME280() {
  * Leitura de temperatura e umidade do DHT22
  */
 void lerSensoresDHT22() {
+  lerSensoresDHT22(false);
+}
+
+/**
+ * Leitura de temperatura e umidade do DHT22
+ * @param forcado Se true, força leitura imediata ignorando intervalo
+ */
+void lerSensoresDHT22(bool forcado) {
   // Se não está disponível, tentar reconectar
   if (!estado.dht22Disponivel) {
     dht22.begin();
@@ -809,7 +829,7 @@ void lerSensoresDHT22() {
     return;
   }
   
-  if (millis() - estado.ultimaLeituraDHT22 >= estado.INTERVALO_DHT22) {
+  if (forcado || millis() - estado.ultimaLeituraDHT22 >= estado.INTERVALO_DHT22) {
     float temp = dht22.readTemperature();
     float umid = dht22.readHumidity();
     
@@ -851,6 +871,14 @@ void lerSensoresDHT22() {
  * Leitura de radiação UV do sensor GUVA-S12SD
  */
 void lerSensorUV() {
+  lerSensorUV(false);
+}
+
+/**
+ * Leitura de radiação UV do sensor GUVA-S12SD
+ * @param forcado Se true, força leitura imediata ignorando intervalo
+ */
+void lerSensorUV(bool forcado) {
   // Se não está disponível, tentar reconectar
   if (!estado.uvDisponivel) {
     pinMode(UV_PIN, INPUT);
@@ -865,7 +893,7 @@ void lerSensorUV() {
     }
   }
   
-  if (millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
+  if (forcado || millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
     // Ler valor analógico do sensor (0-1023)
     estado.nivelUV = analogRead(UV_PIN);
     
@@ -992,9 +1020,11 @@ void processarComandoBLE(String comando) {
     resposta = "Rele 2 desligado";
   }
   else if (comando == "GET_STATUS" || comando == "STATUS") {
-    lerSensoresBME280();
-    lerSensoresDHT22();
-    lerSensorUV();
+    // Forçar leitura imediata de todos os sensores
+    lerSensoresBME280(true);
+    delay(100); // Delay para DHT22 processar
+    lerSensoresDHT22(true);
+    lerSensorUV(true);
     resposta = "LED:" + String(estado.led) + 
                ",R1:" + String(estado.rele1) + 
                ",R2:" + String(estado.rele2) +
@@ -1006,9 +1036,12 @@ void processarComandoBLE(String comando) {
                ",UV:" + String(estado.indiceUV, 1);
   }
   else if (comando == "GET_SENSORS" || comando == "SENSORES") {
-    lerSensoresBME280();
-    lerSensoresDHT22();
-    lerSensorUV();
+    // Forçar leitura imediata de todos os sensores
+    Serial.println("[BLE] GET_SENSORS - Forçando leitura de todos os sensores...");
+    lerSensoresBME280(true);
+    delay(100); // Delay para DHT22 processar
+    lerSensoresDHT22(true);
+    lerSensorUV(true);
     resposta = "TEMP:" + String(estado.temperatura_bme280, 1) + 
                ",UMID:" + String(estado.umidade_bme280, 1) +
                ",PRESS:" + String(estado.pressao, 1) +
@@ -1020,38 +1053,64 @@ void processarComandoBLE(String comando) {
     resposta = "BME280:" + String(estado.bme280Disponivel ? "OK" : "ERRO") +
                ",DHT22:" + String(estado.dht22Disponivel ? "OK" : "ERRO") +
                ",UV:" + String(estado.uvDisponivel ? "OK" : "ERRO") +
+               ",SD:" + String(estado.cartaoSDconectado ? "OK" : "ERRO") +
                ",LED:" + String(estado.led ? "ON" : "OFF") +
                ",R1:" + String(estado.rele1 ? "ON" : "OFF") +
                ",R2:" + String(estado.rele2 ? "ON" : "OFF");
   }
   else if (comando == "SD_STATUS") {
-    // Lista arquivos no SD
-    File raiz = SD.open("/");
-    if (!raiz) {
-      resposta = "SD_STATUS:Erro ao abrir SD";
+    // Verificar status do SD Card
+    if (!estado.cartaoSDconectado) {
+      resposta = "SD:Desconectado";
     } else {
-      resposta = "SD_STATUS:";
-      if (estado.cartaoSDconectado) {
-        resposta += "Conectado,Arquivos:";
-        File arquivo;
-        arquivo = raiz.openNextFile();
+      // Tentar acessar o cartão
+      File raiz = SD.open("/");
+      if (!raiz) {
+        // Cartão estava marcado como conectado mas falhou
+        estado.cartaoSDconectado = false;
+        resposta = "SD:Erro_ao_abrir";
+        Serial.println("[SD_CARD] ⚠ Cartão SD falhou - marcado como desconectado");
+      } else {
+        // Listar arquivos
+        resposta = "SD:Conectado,Files:";
+        int fileCount = 0;
+        File arquivo = raiz.openNextFile();
         while (arquivo) {
-          resposta += arquivo.name();
-          resposta += "|";
+          if (fileCount > 0) resposta += "|";
+          resposta += String(arquivo.name());
+          resposta += "(";
+          resposta += String(arquivo.size());
+          resposta += "B)";
+          fileCount++;
           arquivo.close();
           arquivo = raiz.openNextFile();
+          // Limitar a 10 arquivos para não exceder buffer BLE
+          if (fileCount >= 10) break;
         }
-      } else {
-        resposta += "Desconectado";
+        if (fileCount == 0) {
+          resposta += "vazio";
+        }
+        raiz.close();
       }
-      raiz.close();
     }
   }
   else if (comando == "SD_GRAVAR") {
     // Forçar gravação imediata
-    estado.ultimaGravagemSD = 0;  // Resetar timer
-    gravarDadosSD();
-    resposta = estado.cartaoSDconectado ? "SD_GRAVAR:OK" : "SD_GRAVAR:Erro";
+    if (!estado.cartaoSDconectado) {
+      resposta = "SD_GRAVAR:Erro_SD_Desconectado";
+    } else {
+      // Forçar leitura dos sensores primeiro
+      lerSensoresBME280(true);
+      delay(100);
+      lerSensoresDHT22(true);
+      lerSensorUV(true);
+      
+      estado.ultimaGravagemSD = 0;  // Resetar timer para forçar gravação
+      gravarDadosSD();
+      
+      // Verificar se ainda está conectado após gravação
+      resposta = estado.cartaoSDconectado ? "SD_GRAVAR:OK" : "SD_GRAVAR:Erro_Falha_Gravacao";
+    }
   }
   else if (comando == "SD_INIT") {
     // Tentar reinicializar SD Card
