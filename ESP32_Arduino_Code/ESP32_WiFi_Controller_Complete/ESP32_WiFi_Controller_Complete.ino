@@ -242,7 +242,13 @@ void inicializarBME280() {
   Serial.print("% | P: ");
   Serial.print(testPress, 1);
   Serial.println("hPa");
-  
+
+  // Armazenar leitura inicial no estado
+  estado.temperatura_bme280 = testTemp;
+  estado.umidade_bme280 = testUmid;
+  estado.pressao = testPress;
+  estado.ultimaLeituraTemp = millis();
+
   Serial.println("✓ Sensor configurado em modo normal");
 }
 
@@ -369,6 +375,11 @@ void gravarDadosSD() {
     return;
   }
   
+  // Forçar leitura atualizada de todos os sensores antes de gravar
+  lerSensoresBME280(true);
+  lerSensoresDHT22(true);
+  lerSensorUV(true);
+
   // Abrir arquivo para adicionar dados
   arquivo = SD.open(nomeArquivo, FILE_APPEND);
   if (arquivo) {
@@ -389,6 +400,7 @@ void gravarDadosSD() {
     linha += String(estado.indiceUV, 1);
     
     arquivo.println(linha);
+    arquivo.flush();
     arquivo.close();
     
     Serial.print("[SD_CARD] ✓ Dados gravados em: ");
