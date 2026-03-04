@@ -388,10 +388,24 @@ void criarArquivoCSV() {
   // Usar nome fixo para não criar arquivos duplicados a cada boot
   String nomeArquivo = "/dados.csv";
   
+  // Verificar se arquivo existente usa formato antigo (separador ,)
+  if (SD.exists(nomeArquivo)) {
+    File check = SD.open(nomeArquivo, FILE_READ);
+    if (check) {
+      String header = check.readStringUntil('\n');
+      check.close();
+      if (header.indexOf(',') >= 0 && header.indexOf(';') < 0) {
+        // Formato antigo com vírgula - renomear para backup
+        SD.rename(nomeArquivo, "/dados_old.csv");
+        Serial.println("⚠ Arquivo antigo (formato ,) renomeado para /dados_old.csv");
+      }
+    }
+  }
+  
   if (!SD.exists(nomeArquivo)) {
     File arquivo = SD.open(nomeArquivo, FILE_WRITE);
     if (arquivo) {
-      arquivo.println("Timestamp,Temp_BME280,Umid_BME280,Press,Temp_DHT22,Umid_DHT22,UV_Index");
+      arquivo.println("Timestamp;Temp_BME280;Umid_BME280;Pressao;Temp_DHT22;Umid_DHT22;Indice_UV");
       arquivo.close();
       Serial.print("✓ Arquivo criado: ");
       Serial.println(nomeArquivo);
@@ -434,20 +448,20 @@ void gravarDadosSD() {
   // Abrir arquivo para adicionar dados
   File arquivo = SD.open(estado.nomeArquivoCSV, FILE_APPEND);
   if (arquivo) {
-    // Construir linha CSV
+    // Construir linha CSV (separador ; para Excel PT-BR)
     String linha = "";
     linha += agora;
-    linha += ",";
+    linha += ";";
     linha += String(estado.temperatura_bme280, 2);
-    linha += ",";
+    linha += ";";
     linha += String(estado.umidade_bme280, 2);
-    linha += ",";
+    linha += ";";
     linha += String(estado.pressao, 2);
-    linha += ",";
+    linha += ";";
     linha += String(estado.temperatura_dht22, 2);
-    linha += ",";
+    linha += ";";
     linha += String(estado.umidade_dht22, 2);
-    linha += ",";
+    linha += ";";
     linha += String(estado.indiceUV, 1);
     
     arquivo.println(linha);
