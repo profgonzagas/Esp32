@@ -93,6 +93,9 @@ struct Estado {
   bool cartaoSDconectado = false;
   unsigned long ultimaGravagemSD = 0;
   const unsigned long INTERVALO_GRAVACAO_SD = 30000; // Grava a cada 30 segundos
+  String nomeArquivoCSV = "";  // Nome do arquivo CSV ativo
+  unsigned long ultimaTentativaSD = 0;
+  const unsigned long INTERVALO_RETRY_SD = 60000; // Tenta reconectar SD a cada 60 segundos
   
   unsigned long ultimaLeituraTemp = 0;
   unsigned long ultimaLeituraDHT22 = 0;
@@ -109,6 +112,30 @@ const unsigned long TIMEOUT_CONEXAO = 20000; // Timeout de 20 segundos
 // Forward declarations
 void processarComandoBLE(String comando);
 void enviarRespostaBLE(String mensagem);
+void lerSensoresBME280(bool forcado = false);
+void lerSensoresDHT22(bool forcado = false);
+void lerSensorUV(bool forcado = false);
+void enviarJSON(String json);
+void handleStatus();
+void handleSensores();
+void handlePWM();
+void handleGPIO();
+void ligarLED();
+void desligarLED();
+void ligarRele(int numero);
+void desligarRele(int numero);
+void criarArquivoCSV();
+void gravarDadosSD();
+void inicializarCartaoSD();
+void configurarRotas();
+void inicializarWiFi();
+void inicializarBLE();
+void inicializarBME280();
+void inicializarDHT22();
+void inicializarSensorUV();
+void verificarConexaoWiFi();
+void gerenciarBLE();
+void piscarLED();
 
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -124,7 +151,8 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 class MyBLECallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-        String rxValue = pCharacteristic->getValue();
+        std::string rxStd = pCharacteristic->getValue();
+        String rxValue = String(rxStd.c_str());
         
         if (rxValue.length() > 0) {
             Serial.print("[BLE] Recebido: ");
@@ -258,10 +286,15 @@ void inicializarBME280() {
 void inicializarCartaoSD() {
   Serial.println("\n=== INICIALIZANDO CARTÃO SD ===");
   
-  // Configurar pinos SPI
+  // Configurar pinos SPI (NÃO passar CS pin - SD.begin gerencia o CS)
   Serial.println("Configurando SPI...");
-  SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+  SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
   delay(100);
+  
+  // Configurar CS como output
+  pinMode(SD_CS_PIN, OUTPUT);
+  digitalWrite(SD_CS_PIN, HIGH);
+  delay(50);
   
   // Tentar inicializar SD com velocidade baixa (4MHz para maior compatibilidade)
   Serial.println("Tentando inicializar SD Card (4MHz)...");
@@ -320,7 +353,8 @@ void inicializarCartaoSD() {
 void criarArquivoCSV() {
   if (!estado.cartaoSDconectado) return;
   
-  String nomeArquivo = "/dados_" + String(millis() / 1000) + ".csv";
+  // Usar nome fixo para não criar arquivos duplicados a cada boot
+  String nomeArquivo = "/dados.csv";
   
   if (!SD.exists(nomeArquivo)) {
     File arquivo = SD.open(nomeArquivo, FILE_WRITE);
@@ -329,8 +363,15 @@ void criarArquivoCSV() {
       arquivo.close();
       Serial.print("✓ Arquivo criado: ");
       Serial.println(nomeArquivo);
+    } else {
+      Serial.println("✗ Erro ao criar arquivo CSV");
     }
+  } else {
+    Serial.println("✓ Arquivo CSV já existe: " + nomeArquivo);
   }
+  
+  // Guardar nome do arquivo ativo
+  estado.nomeArquivoCSV = nomeArquivo;
 }
 
 /**
@@ -346,33 +387,11 @@ void gravarDadosSD() {
   
   estado.ultimaGravagemSD = agora;
   
-  // Procurar arquivo mais recente
-  File raiz = SD.open("/");
-  if (!raiz) {
-    Serial.println("[SD_CARD] ⚠ Erro ao abrir diretório raiz");
-    estado.cartaoSDconectado = false;
-    return;
-  }
-  
-  File arquivo;
-  String nomeArquivo = "";
-  
-  arquivo = raiz.openNextFile();
-  while (arquivo) {
-    String nome = arquivo.name();
-    // Verificar se arquivo termina com .csv
-    if (nome.length() > 4 && nome.substring(nome.length() - 4) == ".csv") {
-      nomeArquivo = "/" + nome;
-    }
-    arquivo.close();
-    arquivo = raiz.openNextFile();
-  }
-  raiz.close();
-  
-  if (nomeArquivo == "") {
-    Serial.println("[SD_CARD] ⚠ Nenhum arquivo CSV encontrado, criando...");
+  // Verificar se temos nome de arquivo válido
+  if (estado.nomeArquivoCSV == "") {
+    Serial.println("[SD_CARD] ⚠ Nenhum arquivo CSV configurado, criando...");
     criarArquivoCSV();
-    return;
+    if (estado.nomeArquivoCSV == "") return;
   }
   
   // Forçar leitura atualizada de todos os sensores antes de gravar
@@ -381,7 +400,7 @@ void gravarDadosSD() {
   lerSensorUV(true);
 
   // Abrir arquivo para adicionar dados
-  arquivo = SD.open(nomeArquivo, FILE_APPEND);
+  File arquivo = SD.open(estado.nomeArquivoCSV, FILE_APPEND);
   if (arquivo) {
     // Construir linha CSV
     String linha = "";
@@ -404,11 +423,13 @@ void gravarDadosSD() {
     arquivo.close();
     
     Serial.print("[SD_CARD] ✓ Dados gravados em: ");
-    Serial.println(nomeArquivo);
+    Serial.println(estado.nomeArquivoCSV);
   } else {
     Serial.print("[SD_CARD] ✗ Erro ao abrir arquivo: ");
-    Serial.println(nomeArquivo);
-    estado.cartaoSDconectado = false;
+    Serial.println(estado.nomeArquivoCSV);
+    // Não desconectar imediatamente - tentar recriar arquivo na próxima vez
+    estado.nomeArquivoCSV = "";
+    Serial.println("[SD_CARD] ⚠ Arquivo será recriado na próxima gravação");
   }
 }
 
@@ -565,6 +586,10 @@ void configurarRotas() {
     
     String json = "{\"status\":\"ok\",\"arquivos\":[";
     File raiz = SD.open("/");
+    if (!raiz) {
+      enviarJSON("{\"status\":\"erro\",\"mensagem\":\"Erro ao abrir diretório raiz\"}");
+      return;
+    }
     File arquivo = raiz.openNextFile();
     bool primeiro = true;
     
@@ -598,8 +623,8 @@ void configurarRotas() {
     if (SD.remove("/" + nomeArquivo)) {
       enviarJSON("{\"status\":\"ok\",\"mensagem\":\"Arquivo deletado com sucesso\"}");
     } else {
-      enviarJSON("{\"status\":\"erro\",\"mensagem\":\"Falha ao deletar arquivo\"}");
-      estado.cartaoSDconectado = false;
+      // Não desconectar SD por falha ao deletar (arquivo pode simplesmente não existir)
+      enviarJSON("{\"status\":\"erro\",\"mensagem\":\"Falha ao deletar arquivo - verifique se o nome está correto\"}");
     }
   });
   
@@ -774,13 +799,6 @@ void desligarRele(int numero) {
 
 /**
  * Leitura de temperatura, umidade e pressão do BME280
- */
-void lerSensoresBME280() {
-  lerSensoresBME280(false);
-}
-
-/**
- * Leitura de temperatura, umidade e pressão do BME280
  * @param forcado Se true, força leitura imediata ignorando intervalo
  */
 void lerSensoresBME280(bool forcado) {
@@ -809,13 +827,6 @@ void lerSensoresBME280(bool forcado) {
     Serial.print(estado.pressao, 2);
     Serial.println(" hPa");
   }
-}
-
-/**
- * Leitura de temperatura e umidade do DHT22
- */
-void lerSensoresDHT22() {
-  lerSensoresDHT22(false);
 }
 
 /**
@@ -877,13 +888,6 @@ void lerSensoresDHT22(bool forcado) {
     
     estado.ultimaLeituraDHT22 = millis();
   }
-}
-
-/**
- * Leitura de radiação UV do sensor GUVA-S12SD
- */
-void lerSensorUV() {
-  lerSensorUV(false);
 }
 
 /**
@@ -1294,5 +1298,15 @@ void loop() {
   
   // Gravar dados no SD Card a cada 30 segundos
   gravarDadosSD();
+  
+  // Auto-recovery do SD Card
+  if (!estado.cartaoSDconectado) {
+    unsigned long agora = millis();
+    if (agora - estado.ultimaTentativaSD >= estado.INTERVALO_RETRY_SD) {
+      estado.ultimaTentativaSD = agora;
+      Serial.println("[SD_CARD] 🔄 Tentando reconectar SD Card...");
+      inicializarCartaoSD();
+    }
+  }
   
 }
