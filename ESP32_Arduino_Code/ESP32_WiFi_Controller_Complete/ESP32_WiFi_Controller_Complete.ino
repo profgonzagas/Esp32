@@ -43,7 +43,8 @@ const int PORT = 80;
 #define RELE2_PIN 27        // Relé 2 em GPIO 27
 #define SDA_PIN 21          // I2C SDA para BME280
 #define SCL_PIN 22          // I2C SCL para BME280
-#define BME280_ADDRESS 0x77 // Endereço I2C do BME280 (padrão é 0x77)
+#define BME280_ADDRESS_1 0x76 // Endereço I2C do BME280 (SDO -> GND)
+#define BME280_ADDRESS_2 0x77 // Endereço I2C do BME280 (SDO -> VCC)
 #define DHT22_PIN 4         // DHT22 em GPIO 4
 #define DHTTYPE DHT22       // Usar DHT22
 #define UV_PIN 34           // GUVA-S12SD em GPIO 34 (Analógico)
@@ -96,6 +97,10 @@ struct Estado {
   String nomeArquivoCSV = "";  // Nome do arquivo CSV ativo
   unsigned long ultimaTentativaSD = 0;
   const unsigned long INTERVALO_RETRY_SD = 60000; // Tenta reconectar SD a cada 60 segundos
+  // BME280 retry
+  unsigned long ultimaTentativaBME280 = 0;
+  const unsigned long INTERVALO_RETRY_BME280 = 10000; // Tenta reconectar BME280 a cada 10 segundos
+  uint8_t bme280Endereco = 0; // Endereço I2C detectado
   
   unsigned long ultimaLeituraTemp = 0;
   unsigned long ultimaLeituraDHT22 = 0;
@@ -234,16 +239,43 @@ void inicializarBME280() {
   Wire.begin(SDA_PIN, SCL_PIN);
   delay(100);
   
-  // Tentar conectar ao BME280
-  if (!bme280.begin(BME280_ADDRESS)) {
-    Serial.println("✗ Não foi possível encontrar o BME280!");
-    Serial.println("Verifique a conexão do sensor:");
-    Serial.println("  SDA -> GPIO 21");
-    Serial.println("  SCL -> GPIO 22");
-    Serial.println("  VCC -> 3.3V");
-    Serial.println("  GND -> GND");
-    Serial.println("⚠ Continuando sem BME280...");
-    return;
+  // Scan I2C para encontrar dispositivos
+  Serial.println("Scanning I2C...");
+  int encontrados = 0;
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.print("  Dispositivo I2C encontrado em 0x");
+      Serial.println(addr, HEX);
+      encontrados++;
+    }
+  }
+  if (encontrados == 0) {
+    Serial.println("  Nenhum dispositivo I2C encontrado!");
+  }
+  
+  // Tentar endereço 0x76 primeiro (mais comum em módulos)
+  Serial.println("Tentando BME280 em 0x76...");
+  if (bme280.begin(BME280_ADDRESS_1)) {
+    estado.bme280Endereco = BME280_ADDRESS_1;
+    Serial.println("✓ BME280 encontrado em 0x76!");
+  } else {
+    // Tentar endereço 0x77
+    Serial.println("Tentando BME280 em 0x77...");
+    if (bme280.begin(BME280_ADDRESS_2)) {
+      estado.bme280Endereco = BME280_ADDRESS_2;
+      Serial.println("✓ BME280 encontrado em 0x77!");
+    } else {
+      Serial.println("✗ Não foi possível encontrar o BME280!");
+      Serial.println("  Nenhum BME280 em 0x76 ou 0x77");
+      Serial.println("Verifique a conexão do sensor:");
+      Serial.println("  SDA -> GPIO 21");
+      Serial.println("  SCL -> GPIO 22");
+      Serial.println("  VCC -> 3.3V");
+      Serial.println("  GND -> GND");
+      Serial.println("⚠ Continuando sem BME280...");
+      return;
+    }
   }
   
   estado.bme280Disponivel = true;
@@ -802,14 +834,28 @@ void desligarRele(int numero) {
  * @param forcado Se true, força leitura imediata ignorando intervalo
  */
 void lerSensoresBME280(bool forcado) {
-  // Se não está disponível, tentar reconectar uma vez
+  // Se não está disponível, tentar reconectar com throttle
   if (!estado.bme280Disponivel) {
-    if (!bme280.begin(BME280_ADDRESS)) {
-      Serial.println("[BME280] ⚠ Sensor não está disponível");
+    unsigned long agora = millis();
+    if (agora - estado.ultimaTentativaBME280 < estado.INTERVALO_RETRY_BME280) {
+      return; // Esperar antes de tentar novamente
+    }
+    estado.ultimaTentativaBME280 = agora;
+    
+    Serial.println("[BME280] 🔄 Tentando reconectar...");
+    // Tentar ambos endereços
+    if (bme280.begin(BME280_ADDRESS_1)) {
+      estado.bme280Endereco = BME280_ADDRESS_1;
+      Serial.println("[BME280] ✓ Reconectado em 0x76!");
+      estado.bme280Disponivel = true;
+    } else if (bme280.begin(BME280_ADDRESS_2)) {
+      estado.bme280Endereco = BME280_ADDRESS_2;
+      Serial.println("[BME280] ✓ Reconectado em 0x77!");
+      estado.bme280Disponivel = true;
+    } else {
+      Serial.println("[BME280] ⚠ Sensor não encontrado (próxima tentativa em 10s)");
       return;
     }
-    Serial.println("[BME280] ✓ Reconectado!");
-    estado.bme280Disponivel = true;
   }
   
   if (forcado || millis() - estado.ultimaLeituraTemp >= estado.INTERVALO_LEITURA) {
