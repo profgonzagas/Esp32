@@ -132,6 +132,7 @@ void desligarRele(int numero);
 void criarArquivoCSV();
 void gravarDadosSD();
 void inicializarCartaoSD();
+bool verificarSaudeSD();
 void configurarRotas();
 void inicializarWiFi();
 void inicializarBLE();
@@ -313,25 +314,87 @@ void inicializarBME280() {
 }
 
 /**
+ * Verifica se o cartão SD está saudável (pode ler/escrever)
+ */
+bool verificarSaudeSD() {
+  if (!estado.cartaoSDconectado) return false;
+  
+  // Tentar abrir diretório raiz como health check
+  File raiz = SD.open("/");
+  if (!raiz) {
+    Serial.println("[SD_CARD] ✗ Health check falhou - não conseguiu abrir raiz");
+    estado.cartaoSDconectado = false;
+    return false;
+  }
+  raiz.close();
+  
+  // Verificar se cardType ainda é válido
+  uint8_t cardType = SD.cardType();
+  if (cardType == CARD_NONE) {
+    Serial.println("[SD_CARD] ✗ Health check falhou - cartão não detectado");
+    estado.cartaoSDconectado = false;
+    return false;
+  }
+  
+  return true;
+}
+
+/**
  * Inicializa o cartão SD
  */
 void inicializarCartaoSD() {
   Serial.println("\n=== INICIALIZANDO CARTÃO SD ===");
   
-  // Configurar pinos SPI (NÃO passar CS pin - SD.begin gerencia o CS)
+  // IMPORTANTE: Fechar SD antes de reinicializar (evita estado inconsistente)
+  SD.end();
+  SPI.end();
+  delay(100);
+  
+  // Configurar pinos SPI
   Serial.println("Configurando SPI...");
   SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
-  delay(100);
+  delay(200);
   
   // Configurar CS como output
   pinMode(SD_CS_PIN, OUTPUT);
   digitalWrite(SD_CS_PIN, HIGH);
-  delay(50);
+  delay(100);
   
-  // Tentar inicializar SD com velocidade baixa (4MHz para maior compatibilidade)
-  Serial.println("Tentando inicializar SD Card (4MHz)...");
-  if (!SD.begin(SD_CS_PIN, SPI, 4000000)) {
-    Serial.println("✗ Falha ao inicializar cartão SD!");
+  // Tentar inicializar SD com múltiplas tentativas e velocidades
+  bool sdIniciado = false;
+  const int MAX_TENTATIVAS_SD = 3;
+  const unsigned long velocidades[] = {2000000, 1000000, 400000}; // 2MHz, 1MHz, 400kHz
+  const char* velNomes[] = {"2MHz", "1MHz", "400kHz"};
+  
+  for (int vel = 0; vel < 3 && !sdIniciado; vel++) {
+    for (int tentativa = 1; tentativa <= MAX_TENTATIVAS_SD && !sdIniciado; tentativa++) {
+      Serial.printf("Tentativa %d/%d em %s...\n", tentativa, MAX_TENTATIVAS_SD, velNomes[vel]);
+      
+      // Reset do pino CS entre tentativas
+      digitalWrite(SD_CS_PIN, HIGH);
+      delay(50);
+      
+      if (SD.begin(SD_CS_PIN, SPI, velocidades[vel])) {
+        // Verificar se o cartão realmente responde
+        uint8_t cardType = SD.cardType();
+        if (cardType != CARD_NONE) {
+          sdIniciado = true;
+          Serial.printf("✓ SD Card inicializado em %s (tentativa %d)\n", velNomes[vel], tentativa);
+        } else {
+          Serial.println("  ⚠ SD.begin OK mas cartão não detectado");
+          SD.end();
+          delay(200);
+        }
+      } else {
+        Serial.printf("  ✗ Falha na tentativa %d em %s\n", tentativa, velNomes[vel]);
+        SD.end();
+        delay(300);
+      }
+    }
+  }
+  
+  if (!sdIniciado) {
+    Serial.println("✗ Falha ao inicializar cartão SD após todas as tentativas!");
     Serial.println("Possíveis causas:");
     Serial.println("  1. Cartão não formatado em FAT32");
     Serial.println("  2. Cartão não inserido ou mal encaixado");
@@ -340,9 +403,11 @@ void inicializarCartaoSD() {
     Serial.println("     CLK  -> GPIO 18 (SCK)");
     Serial.println("     MOSI -> GPIO 23 (DI/DIN)");
     Serial.println("     MISO -> GPIO 19 (DO/DOUT)");
-    Serial.println("     VCC  -> 3.3V");
+    Serial.println("     VCC  -> 3.3V (NÃO 5V!)");
     Serial.println("     GND  -> GND");
-    Serial.println("  4. Cartão SD danificado");
+    Serial.println("  4. Cartão SD danificado ou incompatível");
+    Serial.println("  5. Conflito SPI com outro dispositivo");
+    Serial.println("  6. Fonte de alimentação insuficiente");
     estado.cartaoSDconectado = false;
     return;
   }
@@ -445,6 +510,14 @@ void gravarDadosSD() {
   lerSensoresDHT22(true);
   lerSensorUV(true);
 
+  // Verificar saúde do cartão antes de gravar
+  if (!verificarSaudeSD()) {
+    Serial.println("[SD_CARD] ✗ Cartão SD com problema - marcado para reinicialização");
+    estado.cartaoSDconectado = false;
+    estado.nomeArquivoCSV = "";
+    return;
+  }
+  
   // Abrir arquivo para adicionar dados
   File arquivo = SD.open(estado.nomeArquivoCSV, FILE_APPEND);
   if (arquivo) {
@@ -464,18 +537,26 @@ void gravarDadosSD() {
     linha += ";";
     linha += String(estado.indiceUV, 1);
     
-    arquivo.println(linha);
+    size_t bytesEscritos = arquivo.println(linha);
     arquivo.flush();
     arquivo.close();
     
-    Serial.print("[SD_CARD] ✓ Dados gravados em: ");
-    Serial.println(estado.nomeArquivoCSV);
+    if (bytesEscritos > 0) {
+      Serial.print("[SD_CARD] ✓ Dados gravados em: ");
+      Serial.println(estado.nomeArquivoCSV);
+    } else {
+      Serial.println("[SD_CARD] ✗ Erro na escrita (0 bytes escritos)!");
+      estado.cartaoSDconectado = false;
+      estado.nomeArquivoCSV = "";
+      Serial.println("[SD_CARD] ⚠ Cartão SD será reinicializado");
+    }
   } else {
     Serial.print("[SD_CARD] ✗ Erro ao abrir arquivo: ");
     Serial.println(estado.nomeArquivoCSV);
-    // Não desconectar imediatamente - tentar recriar arquivo na próxima vez
+    // Marcar como desconectado para forçar reinicialização completa
+    estado.cartaoSDconectado = false;
     estado.nomeArquivoCSV = "";
-    Serial.println("[SD_CARD] ⚠ Arquivo será recriado na próxima gravação");
+    Serial.println("[SD_CARD] ⚠ Cartão SD será reinicializado");
   }
 }
 
@@ -1359,13 +1440,26 @@ void loop() {
   // Gravar dados no SD Card a cada 30 segundos
   gravarDadosSD();
   
-  // Auto-recovery do SD Card
+  // Auto-recovery do SD Card (com SD.end() para limpar estado anterior)
   if (!estado.cartaoSDconectado) {
     unsigned long agora = millis();
     if (agora - estado.ultimaTentativaSD >= estado.INTERVALO_RETRY_SD) {
       estado.ultimaTentativaSD = agora;
       Serial.println("[SD_CARD] 🔄 Tentando reconectar SD Card...");
       inicializarCartaoSD();
+      if (estado.cartaoSDconectado) {
+        Serial.println("[SD_CARD] ✓ SD Card reconectado com sucesso!");
+      }
+    }
+  } else {
+    // Verificação periódica de saúde do SD (a cada 5 minutos)
+    static unsigned long ultimoHealthCheck = 0;
+    if (millis() - ultimoHealthCheck >= 300000) {
+      ultimoHealthCheck = millis();
+      if (!verificarSaudeSD()) {
+        Serial.println("[SD_CARD] ✗ Health check periódico falhou!");
+        estado.nomeArquivoCSV = "";
+      }
     }
   }
   
