@@ -49,10 +49,10 @@ const int PORT = 80;
 #define DHTTYPE DHT22       // Usar DHT22
 #define UV_PIN 34           // GUVA-S12SD em GPIO 34 (Analógico)
 // Pinos do SD Card (SPI)
-#define SD_CS_PIN 5         // Chip Select em GPIO 5
-#define SD_CLK_PIN 18       // Clock em GPIO 18 (SCK)
-#define SD_MOSI_PIN 23      // MOSI/DI/DIN em GPIO 23
-#define SD_MISO_PIN 19      // MISO/DO/DOUT em GPIO 19
+#define SD_CS_PIN 5         // Chip Select em GPIO 5 AMARELO
+#define SD_CLK_PIN 18       // Clock em GPIO 18 (SCK) AZUL
+#define SD_MOSI_PIN 23      // MOSI/DI/DIN em GPIO 23 BRANCO
+#define SD_MISO_PIN 19      // MISO/DO/DOUT em GPIO 19 VERDE
 
 // ==================== OBJETOS GLOBAIS ====================
 WebServer server(PORT);
@@ -87,7 +87,7 @@ struct Estado {
   float umidade_dht22 = 0.0;
   // UV - GUVA-S12SD
   bool uvDisponivel = false;
-  int nivelUV = 0;           // 0-1023 (valor analógico)
+  int nivelUV = 0;           // 0-4095 (valor analógico 12-bit)
   float indiceUV = 0.0;      // Índice UV calculado (0-15)
   unsigned long ultimaLeituraUV = 0;
   // SD Card
@@ -185,7 +185,7 @@ void inicializarSensorUV() {
     estado.uvDisponivel = true;
     Serial.println("✓ Sensor UV inicializado com sucesso!");
     Serial.println("  Pino: GPIO 34 (Analógico)");
-    Serial.println("  Faixa: 0-1023 (ADC 12-bit)");
+    Serial.println("  Faixa: 0-4095 (ADC 12-bit)");
     Serial.print("  Leitura teste: ");
     Serial.println(testUV);
   } else {
@@ -521,9 +521,17 @@ void gravarDadosSD() {
   // Abrir arquivo para adicionar dados
   File arquivo = SD.open(estado.nomeArquivoCSV, FILE_APPEND);
   if (arquivo) {
+    // Converter millis para formato H:M:S
+    unsigned long totalSegundos = agora / 1000;
+    unsigned long horas = totalSegundos / 3600;
+    unsigned long minutos = (totalSegundos % 3600) / 60;
+    unsigned long segundos = totalSegundos % 60;
+    char timestamp[12];
+    sprintf(timestamp, "%lu:%02lu:%02lu", horas, minutos, segundos);
+
     // Construir linha CSV (separador ; para Excel PT-BR)
     String linha = "";
-    linha += agora;
+    linha += timestamp;
     linha += ";";
     linha += String(estado.temperatura_bme280, 2);
     linha += ";";
@@ -1051,15 +1059,14 @@ void lerSensorUV(bool forcado) {
   }
   
   if (forcado || millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
-    // Ler valor analógico do sensor (0-1023)
+    // Ler valor analógico do sensor (0-4095, ESP32 ADC 12-bit)
     estado.nivelUV = analogRead(UV_PIN);
     
-    // Converter para índice UV (aproximação empírica)
-    // GUVA-S12SD: ~1V = 1 mW/cm² (irradiância UV)
-    // Tensão = (nivelUV / 1023) * 3.3V
-    float tensao = (estado.nivelUV / 1023.0) * 3.3;
-    float irradiancia = (tensao / 0.1) * 0.001; // em W/cm²
-    estado.indiceUV = irradiancia * 40; // Conversão para índice UV (0-15)
+    // Converter para índice UV
+    // GUVA-S12SD: saída analógica ~0.1V por índice UV
+    // Tensão = (nivelUV / 4095) * 3.3V
+    float tensao = (estado.nivelUV / 4095.0) * 3.3;
+    estado.indiceUV = tensao / 0.1; // Cada 0.1V ≈ 1 índice UV
     
     // Limitar a índice UV a máximo de 15
     if (estado.indiceUV > 15) estado.indiceUV = 15;
