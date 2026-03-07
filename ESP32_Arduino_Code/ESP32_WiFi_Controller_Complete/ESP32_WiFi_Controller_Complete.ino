@@ -786,11 +786,8 @@ void enviarJSON(String json) {
  * Handler para status completo
  */
 void handleStatus() {
-  // Forçar leitura imediata de todos os sensores
-  lerSensoresBME280(true);
-  delay(100); // Delay para DHT22 processar
-  lerSensoresDHT22(true);
-  lerSensorUV(true);
+  // Usar valores em cache (atualizados no loop principal)
+  // Não forçar leitura aqui para não bloquear o loop com delays
   
   String json = "{";
   json += "\"status\":\"conectado\",";
@@ -818,11 +815,8 @@ void handleStatus() {
  * Handler para leitura de sensores
  */
 void handleSensores() {
-  // Forçar leitura imediata de todos os sensores
-  lerSensoresBME280(true);
-  delay(100); // Delay para DHT22 processar
-  lerSensoresDHT22(true);
-  lerSensorUV(true);
+  // Usar valores em cache (atualizados no loop principal)
+  // Não forçar leitura aqui para não bloquear o loop com delays
   
   String json = "[";
   json += "{\"nome\":\"Temperatura (BME280)\",\"valor\":" + String(estado.temperatura_bme280, 2) + ",\"unidade\":\"°C\",\"icone\":\"🌡\"},";
@@ -985,7 +979,7 @@ void lerSensoresDHT22(bool forcado) {
   // Se não está disponível, tentar reconectar
   if (!estado.dht22Disponivel) {
     dht22.begin();
-    delay(500);
+    delay(100);
     float t = dht22.readTemperature();
     float u = dht22.readHumidity();
     if (!isnan(t) && !isnan(u)) {
@@ -1015,23 +1009,7 @@ void lerSensoresDHT22(bool forcado) {
       Serial.print(estado.umidade_dht22, 1);
       Serial.println(" %");
     } else {
-      // Se erro, tenta novamente em 2 segundos (não espera 30s)
-      Serial.print("[DHT22] ⚠ Falha na leitura | Tentando novamente...");
-      delay(2000);
-      temp = dht22.readTemperature();
-      umid = dht22.readHumidity();
-      
-      if (!isnan(temp) && !isnan(umid)) {
-        estado.temperatura_dht22 = temp;
-        estado.umidade_dht22 = umid;
-        Serial.print(" ✓ OK! T: ");
-        Serial.print(estado.temperatura_dht22, 1);
-        Serial.print("°C U: ");
-        Serial.print(estado.umidade_dht22, 1);
-        Serial.println("%");
-      } else {
-        Serial.println(" ✗ Erro persistente - Verifique conexão GPIO 4");
-      }
+      Serial.println("[DHT22] ⚠ Falha na leitura - mantendo valores anteriores");
     }
     
     estado.ultimaLeituraDHT22 = millis();
