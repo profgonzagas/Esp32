@@ -177,6 +177,7 @@ class MyBLECallbacks: public BLECharacteristicCallbacks {
 void inicializarSensorUV() {
   Serial.println("\n=== INICIALIZANDO SENSOR UV ===");
   pinMode(UV_PIN, INPUT);
+  analogSetPinAttenuation(UV_PIN, ADC_11db); // Faixa 0-3.3V explícita
   delay(100);
   
   // Teste de leitura
@@ -237,21 +238,6 @@ void inicializarBME280() {
   Serial.println("\n=== INICIALIZANDO BME280 ===");
   
   // Inicializar I2C
-  Wire.begin(SDA_PIN, SCL_PIN);
-  delay(100);
-  
-  // Soft reset do sensor (escrever 0xB6 no registrador 0xE0)
-  // Isso limpa qualquer estado corrompido no sensor
-  Serial.println("Enviando soft reset ao sensor...");
-  for (uint8_t addr : {BME280_ADDRESS_1, BME280_ADDRESS_2}) {
-    Wire.beginTransmission(addr);
-    Wire.write(0xE0); // Reset register
-    Wire.write(0xB6); // Reset command
-    Wire.endTransmission();
-  }
-  delay(300); // Aguardar reset completo (datasheet: 2ms startup, mas dar margem)
-  
-  // Re-inicializar I2C após reset
   Wire.begin(SDA_PIN, SCL_PIN);
   delay(100);
   
@@ -1133,20 +1119,29 @@ void lerSensorUV(bool forcado) {
   }
   
   if (forcado || millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
-    // Ler múltiplas amostras para maior precisão
-    long somaUV = 0;
-    const int NUM_AMOSTRAS = 5;
-    for (int i = 0; i < NUM_AMOSTRAS; i++) {
-      somaUV += analogRead(UV_PIN);
-      delay(2);
-    }
-    estado.nivelUV = somaUV / NUM_AMOSTRAS;
+    // Reconfigurar pino ADC (WiFi pode interferir com ADC)
+    pinMode(UV_PIN, INPUT);
+    analogSetPinAttenuation(UV_PIN, ADC_11db);
+    delay(2);
     
-    // Converter para índice UV
-    // GUVA-S12SD: saída analógica ~0.1V por índice UV
-    // Tensão = (nivelUV / 4095) * 3.3V
-    float tensao = (estado.nivelUV / 4095.0) * 3.3;
-    estado.indiceUV = tensao / 0.1; // Cada 0.1V ≈ 1 índice UV
+    // Descartar primeira leitura (pode estar corrompida pelo WiFi)
+    analogRead(UV_PIN);
+    delayMicroseconds(200);
+    
+    // Fazer 10 leituras e calcular média para estabilidade
+    long soma = 0;
+    for (int i = 0; i < 10; i++) {
+      soma += analogRead(UV_PIN);
+      delayMicroseconds(100);
+    }
+    estado.nivelUV = soma / 10;
+    
+    // Converter para índice UV (fórmula original que funcionava)
+    // GUVA-S12SD: ~1V = 1 mW/cm² (irradiância UV)
+    // Tensão = (nivelUV / 1023) * 3.3V
+    float tensao = (estado.nivelUV / 1023.0) * 3.3;
+    float irradiancia = (tensao / 0.1) * 0.001; // em W/cm²
+    estado.indiceUV = irradiancia * 40; // Conversão para índice UV (0-15)
     
     // Limitar a índice UV a máximo de 15
     if (estado.indiceUV > 15) estado.indiceUV = 15;
@@ -1167,14 +1162,25 @@ void lerSensorUV(bool forcado) {
  */
 void verificarConexaoWiFi() {
   static unsigned long ultimaVerificacao = 0;
-  const unsigned long INTERVALO_VERIFICACAO = 5000; // 5 segundos
+  static int tentativasReconexao = 0;
+  const unsigned long INTERVALO_VERIFICACAO = 30000; // 30 segundos (era 5s - muito frequente interfere ADC)
+  const int MAX_TENTATIVAS = 5;
   
   if (millis() - ultimaVerificacao >= INTERVALO_VERIFICACAO) {
     ultimaVerificacao = millis();
     
     if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("\n✗ Conexão WiFi perdida! Reconectando...");
-      WiFi.reconnect();
+      if (tentativasReconexao < MAX_TENTATIVAS) {
+        tentativasReconexao++;
+        Serial.printf("\n✗ WiFi desconectado. Tentativa %d/%d...\n", tentativasReconexao, MAX_TENTATIVAS);
+        WiFi.reconnect();
+      } else if (tentativasReconexao == MAX_TENTATIVAS) {
+        tentativasReconexao++;
+        Serial.println("\n✗ WiFi: máximo de tentativas atingido. Parando reconexão para não interferir com sensores.");
+        Serial.println("  Reinicie o ESP32 para tentar novamente.");
+      }
+    } else {
+      tentativasReconexao = 0;
     }
   }
 }

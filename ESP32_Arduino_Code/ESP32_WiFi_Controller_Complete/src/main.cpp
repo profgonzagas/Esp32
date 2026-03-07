@@ -24,6 +24,7 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include <driver/adc.h>
 
 // ==================== CONFIGURAÇÕES DE REDE ====================
 const char* ssid = "NecroSENSE";          // Altere para seu WiFi
@@ -176,15 +177,18 @@ class MyBLECallbacks: public BLECharacteristicCallbacks {
  */
 void inicializarSensorUV() {
   Serial.println("\n=== INICIALIZANDO SENSOR UV ===");
-  pinMode(UV_PIN, INPUT);
+  
+  // Usar API de baixo nível para ADC1 (compatível com WiFi)
+  adc1_config_width(ADC_WIDTH_BIT_12);
+  adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
   delay(100);
   
   // Teste de leitura
-  int testUV = analogRead(UV_PIN);
+  int testUV = adc1_get_raw(ADC1_CHANNEL_6);
   if (testUV >= 0) {
     estado.uvDisponivel = true;
     Serial.println("✓ Sensor UV inicializado com sucesso!");
-    Serial.println("  Pino: GPIO 34 (Analógico)");
+    Serial.println("  Pino: GPIO 34 (ADC1_CH6)");
     Serial.println("  Faixa: 0-4095 (ADC 12-bit)");
     Serial.print("  Leitura teste: ");
     Serial.println(testUV);
@@ -1041,28 +1045,37 @@ void lerSensoresDHT22(bool forcado) {
 void lerSensorUV(bool forcado) {
   // Se não está disponível, tentar reconectar
   if (!estado.uvDisponivel) {
-    pinMode(UV_PIN, INPUT);
-    delay(50);
-    int testUV = analogRead(UV_PIN);
-    if (testUV >= 0) {
-      Serial.println("[UV] ✓ Reconectado!");
-      estado.uvDisponivel = true;
-    } else {
-      Serial.println("[UV] ⚠ Sensor não está disponível");
-      if (!forcado) return;
-      // Quando forcado, continuar mesmo sem disponibilidade confirmada
-    }
+    estado.uvDisponivel = true; // Sempre tentar ler
   }
   
   if (forcado || millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
-    // Ler múltiplas amostras para maior precisão
+    // SOLUÇÃO: Pausar SPI antes de ler ADC (SPI interfere com ADC no ESP32)
+    SPI.end();
+    delay(10);
+    
+    // Reconfigurar ADC1 do zero
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+    delay(5);
+    
+    // Descartar primeiras leituras (precisa de várias após SPI.end)
+    for (int d = 0; d < 10; d++) {
+      adc1_get_raw(ADC1_CHANNEL_6);
+      delay(1);
+    }
+    
+    // Ler múltiplas amostras e calcular média
     long somaUV = 0;
-    const int NUM_AMOSTRAS = 5;
+    const int NUM_AMOSTRAS = 20;
     for (int i = 0; i < NUM_AMOSTRAS; i++) {
-      somaUV += analogRead(UV_PIN);
-      delay(2);
+      somaUV += adc1_get_raw(ADC1_CHANNEL_6);
+      delayMicroseconds(500);
     }
     estado.nivelUV = somaUV / NUM_AMOSTRAS;
+    
+    // Reativar SPI para SD Card
+    SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
+    delay(5);
     
     // Converter para índice UV
     // GUVA-S12SD: saída analógica ~0.1V por índice UV
@@ -1089,14 +1102,24 @@ void lerSensorUV(bool forcado) {
  */
 void verificarConexaoWiFi() {
   static unsigned long ultimaVerificacao = 0;
-  const unsigned long INTERVALO_VERIFICACAO = 5000; // 5 segundos
+  static int tentativasReconexao = 0;
+  const unsigned long INTERVALO_VERIFICACAO = 5000; // 30 segundos (era 5s - muito frequente interfere ADC)
+  const int MAX_TENTATIVAS = 5;
   
   if (millis() - ultimaVerificacao >= INTERVALO_VERIFICACAO) {
     ultimaVerificacao = millis();
     
     if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("\n✗ Conexão WiFi perdida! Reconectando...");
-      WiFi.reconnect();
+      if (tentativasReconexao < MAX_TENTATIVAS) {
+        tentativasReconexao++;
+        Serial.printf("\n✗ WiFi desconectado. Tentativa %d/%d...\n", tentativasReconexao, MAX_TENTATIVAS);
+        WiFi.reconnect();
+      } else if (tentativasReconexao == MAX_TENTATIVAS) {
+        tentativasReconexao++;
+        Serial.println("\n✗ WiFi: máximo de tentativas. Parando reconexão.");
+      }
+    } else {
+      tentativasReconexao = 0;
     }
   }
 }

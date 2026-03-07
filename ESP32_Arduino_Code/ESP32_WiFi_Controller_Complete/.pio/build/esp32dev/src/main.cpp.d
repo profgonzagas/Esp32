@@ -242,4 +242,6 @@
  C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/libraries/BLE/src/BLEUtils.h \
  C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/libraries/BLE/src/BLEServer.h \
  C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/libraries/BLE/src/BLEUtils.h \
- C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/libraries/BLE/src/BLE2902.h
+ C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/libraries/BLE/src/BLE2902.h \
+ C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/driver/include/driver/adc.h \
+ C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/hal/include/hal/adc_types.h
