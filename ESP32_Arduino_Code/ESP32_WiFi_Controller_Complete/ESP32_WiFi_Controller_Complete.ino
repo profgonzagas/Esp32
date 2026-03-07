@@ -240,6 +240,21 @@ void inicializarBME280() {
   Wire.begin(SDA_PIN, SCL_PIN);
   delay(100);
   
+  // Soft reset do sensor (escrever 0xB6 no registrador 0xE0)
+  // Isso limpa qualquer estado corrompido no sensor
+  Serial.println("Enviando soft reset ao sensor...");
+  for (uint8_t addr : {BME280_ADDRESS_1, BME280_ADDRESS_2}) {
+    Wire.beginTransmission(addr);
+    Wire.write(0xE0); // Reset register
+    Wire.write(0xB6); // Reset command
+    Wire.endTransmission();
+  }
+  delay(300); // Aguardar reset completo (datasheet: 2ms startup, mas dar margem)
+  
+  // Re-inicializar I2C após reset
+  Wire.begin(SDA_PIN, SCL_PIN);
+  delay(100);
+  
   // Scan I2C para encontrar dispositivos
   Serial.println("Scanning I2C...");
   int encontrados = 0;
@@ -280,7 +295,31 @@ void inicializarBME280() {
   }
   
   estado.bme280Disponivel = true;
-  Serial.println("✓ BME280 inicializado com sucesso!");
+  
+  // Ler chip ID do registrador 0xD0 para identificar BME280 vs BMP280
+  Wire.beginTransmission(estado.bme280Endereco);
+  Wire.write(0xD0);
+  Wire.endTransmission();
+  Wire.requestFrom(estado.bme280Endereco, (uint8_t)1);
+  uint8_t chipID = Wire.read();
+  
+  Serial.print("  Chip ID: 0x");
+  Serial.println(chipID, HEX);
+  
+  if (chipID == 0x60) {
+    Serial.println("✓ Chip confirmado como BME280 (temp + umidade + pressão)");
+  } else if (chipID == 0x58) {
+    Serial.println("⚠ ATENÇÃO: Chip é BMP280 (NÃO é BME280!)");
+    Serial.println("  BMP280 NÃO tem sensor de umidade!");
+    Serial.println("  Leituras de umidade serão inválidas (ex: 100% fixo)");
+    Serial.println("  Pressão pode ter compensação incorreta com lib BME280");
+  } else {
+    Serial.print("⚠ Chip ID desconhecido: 0x");
+    Serial.println(chipID, HEX);
+    Serial.println("  Pode ser um clone ou sensor diferente");
+  }
+  
+  Serial.println("✓ Sensor inicializado!");
   
   // Configurar o sensor para modo normal
   bme280.setSampling(Adafruit_BME280::MODE_NORMAL,
@@ -291,7 +330,7 @@ void inicializarBME280() {
                      Adafruit_BME280::STANDBY_MS_0_5);
   
   // Fazer leitura de teste
-  delay(100);
+  delay(200);
   float testTemp = bme280.readTemperature();
   float testUmid = bme280.readHumidity();
   float testPress = bme280.readPressure() / 100.0F;
@@ -302,7 +341,27 @@ void inicializarBME280() {
   Serial.print(testUmid, 1);
   Serial.print("% | P: ");
   Serial.print(testPress, 1);
-  Serial.println("hPa");
+  Serial.println(" hPa");
+  
+  // Validar leituras de teste
+  bool pressaoValida = (testPress >= 300.0 && testPress <= 1100.0);
+  bool umidadeValida = (testUmid >= 0.0 && testUmid <= 100.0 && testUmid != 100.0); // 100% fixo = suspeito
+  
+  if (!pressaoValida) {
+    Serial.println("  ✗ PRESSÃO FORA DA FAIXA VÁLIDA (300-1100 hPa)!");
+    Serial.print("    Valor lido: ");
+    Serial.print(testPress, 2);
+    Serial.println(" hPa");
+    Serial.println("    Para Brasília (~1100m) o esperado é ~890 hPa");
+    Serial.println("    Possíveis causas:");
+    Serial.println("      1. Módulo é BMP280 (não BME280) com calibração incompatível");
+    Serial.println("      2. Dados de calibração do sensor corrompidos");
+    Serial.println("      3. Sensor clone com firmware defeituoso");
+  }
+  
+  if (!umidadeValida && chipID != 0x60) {
+    Serial.println("  ✗ UMIDADE INVÁLIDA (provavelmente BMP280 sem sensor de umidade)");
+  }
 
   // Armazenar leitura inicial no estado
   estado.temperatura_bme280 = testTemp;
@@ -969,19 +1028,38 @@ void lerSensoresBME280(bool forcado) {
     
     // Validar leituras (NaN = falha de comunicação I2C)
     if (!isnan(temp) && !isnan(umid) && !isnan(press)) {
-      estado.temperatura_bme280 = temp;
-      estado.umidade_bme280 = umid;
-      estado.pressao = press;
+      // Validar faixa de pressão (300-1100 hPa é a faixa válida do BME280)
+      if (press < 300.0 || press > 1100.0) {
+        Serial.print("[BME280] ⚠ Pressão fora da faixa válida: ");
+        Serial.print(press, 2);
+        Serial.println(" hPa (esperado 300-1100)");
+        Serial.println("[BME280] ⚠ Sensor pode ser BMP280 ou ter calibração corrompida");
+        // Não atualizar estado.pressao com valor inválido
+        // Manter temperatura se válida
+        if (temp > -40.0 && temp < 85.0) {
+          estado.temperatura_bme280 = temp;
+        }
+        estado.ultimaLeituraTemp = millis();
+      } else {
+        estado.temperatura_bme280 = temp;
+        estado.umidade_bme280 = umid;
+        estado.pressao = press;
+        estado.ultimaLeituraTemp = millis();
+      }
       
-      estado.ultimaLeituraTemp = millis();
-      
-      Serial.print("[BME280] 🌡 Temperatura: ");
+      Serial.print("[BME280] T: ");
       Serial.print(estado.temperatura_bme280, 1);
-      Serial.print(" °C | 💧 Umidade: ");
+      Serial.print(" °C | U: ");
       Serial.print(estado.umidade_bme280, 1);
-      Serial.print(" % | 🔽 Pressão: ");
+      Serial.print(" % | P: ");
       Serial.print(estado.pressao, 2);
-      Serial.println(" hPa");
+      Serial.print(" hPa");
+      if (press < 300.0 || press > 1100.0) {
+        Serial.print(" [RAW INVÁLIDO: ");
+        Serial.print(press, 2);
+        Serial.print("]");
+      }
+      Serial.println();
     } else {
       Serial.println("[BME280] ⚠ Leitura inválida (NaN) - sensor com problema de comunicação");
       estado.bme280Disponivel = false; // Forçar reconexão na próxima tentativa
