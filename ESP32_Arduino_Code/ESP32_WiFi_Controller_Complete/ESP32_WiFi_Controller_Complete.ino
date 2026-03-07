@@ -506,8 +506,14 @@ void gravarDadosSD() {
   
   // Forçar leitura atualizada de todos os sensores antes de gravar
   lerSensoresBME280(true);
+  delay(50); // Aguardar I2C do BME280 completar
   lerSensoresDHT22(true);
+  delay(50);
   lerSensorUV(true);
+
+  Serial.printf("[SD_CARD] Valores para gravação: BME280(T:%.2f U:%.2f P:%.2f) DHT22(T:%.2f U:%.2f) UV(%.1f)\n",
+    estado.temperatura_bme280, estado.umidade_bme280, estado.pressao,
+    estado.temperatura_dht22, estado.umidade_dht22, estado.indiceUV);
 
   // Verificar saúde do cartão antes de gravar
   if (!verificarSaudeSD()) {
@@ -933,7 +939,8 @@ void lerSensoresBME280(bool forcado) {
   // Se não está disponível, tentar reconectar com throttle
   if (!estado.bme280Disponivel) {
     unsigned long agora = millis();
-    if (agora - estado.ultimaTentativaBME280 < estado.INTERVALO_RETRY_BME280) {
+    // Quando forcado=true, ignorar throttle para reconectar imediatamente
+    if (!forcado && agora - estado.ultimaTentativaBME280 < estado.INTERVALO_RETRY_BME280) {
       return; // Esperar antes de tentar novamente
     }
     estado.ultimaTentativaBME280 = agora;
@@ -955,19 +962,29 @@ void lerSensoresBME280(bool forcado) {
   }
   
   if (forcado || millis() - estado.ultimaLeituraTemp >= estado.INTERVALO_LEITURA) {
-    estado.temperatura_bme280 = bme280.readTemperature();
-    estado.umidade_bme280 = bme280.readHumidity();
-    estado.pressao = bme280.readPressure() / 100.0F; // Converter Pa para hPa
+    float temp = bme280.readTemperature();
+    float umid = bme280.readHumidity();
+    float press = bme280.readPressure() / 100.0F; // Converter Pa para hPa
     
-    estado.ultimaLeituraTemp = millis();
-    
-    Serial.print("[BME280] 🌡 Temperatura: ");
-    Serial.print(estado.temperatura_bme280, 1);
-    Serial.print(" °C | 💧 Umidade: ");
-    Serial.print(estado.umidade_bme280, 1);
-    Serial.print(" % | 🔽 Pressão: ");
-    Serial.print(estado.pressao, 2);
-    Serial.println(" hPa");
+    // Validar leituras (NaN = falha de comunicação I2C)
+    if (!isnan(temp) && !isnan(umid) && !isnan(press)) {
+      estado.temperatura_bme280 = temp;
+      estado.umidade_bme280 = umid;
+      estado.pressao = press;
+      
+      estado.ultimaLeituraTemp = millis();
+      
+      Serial.print("[BME280] 🌡 Temperatura: ");
+      Serial.print(estado.temperatura_bme280, 1);
+      Serial.print(" °C | 💧 Umidade: ");
+      Serial.print(estado.umidade_bme280, 1);
+      Serial.print(" % | 🔽 Pressão: ");
+      Serial.print(estado.pressao, 2);
+      Serial.println(" hPa");
+    } else {
+      Serial.println("[BME280] ⚠ Leitura inválida (NaN) - sensor com problema de comunicação");
+      estado.bme280Disponivel = false; // Forçar reconexão na próxima tentativa
+    }
   }
 }
 
@@ -1031,13 +1048,20 @@ void lerSensorUV(bool forcado) {
       estado.uvDisponivel = true;
     } else {
       Serial.println("[UV] ⚠ Sensor não está disponível");
-      return;
+      if (!forcado) return;
+      // Quando forcado, continuar mesmo sem disponibilidade confirmada
     }
   }
   
   if (forcado || millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
-    // Ler valor analógico do sensor (0-4095, ESP32 ADC 12-bit)
-    estado.nivelUV = analogRead(UV_PIN);
+    // Ler múltiplas amostras para maior precisão
+    long somaUV = 0;
+    const int NUM_AMOSTRAS = 5;
+    for (int i = 0; i < NUM_AMOSTRAS; i++) {
+      somaUV += analogRead(UV_PIN);
+      delay(2);
+    }
+    estado.nivelUV = somaUV / NUM_AMOSTRAS;
     
     // Converter para índice UV
     // GUVA-S12SD: saída analógica ~0.1V por índice UV
