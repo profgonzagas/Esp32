@@ -157,7 +157,8 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 class MyBLECallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-        String rxValue = pCharacteristic->getValue();
+        std::string value = pCharacteristic->getValue();
+        String rxValue = String(value.c_str());
         
         if (rxValue.length() > 0) {
             Serial.print("[BLE] Recebido: ");
