@@ -1,4 +1,8 @@
-/*
+
+/*  pio run --target upload -p COM5 ESP32_Arduino_Code/ESP32_WiFi_Controller_Complete/ESP32_WiFi_Controller_Complete.ino */
+// pio run --target upload 
+
+/**
  * NecroSENSE - Código WiFi HTTP Completo para ESP32
  * 
  * Sensores Integrados:
@@ -259,28 +263,40 @@ void inicializarBME280() {
     Serial.println("  Nenhum dispositivo I2C encontrado!");
   }
   
-  // Tentar endereço 0x76 primeiro (mais comum em módulos)
-  Serial.println("Tentando BME280 em 0x76...");
-  if (bme280.begin(BME280_ADDRESS_1)) {
-    estado.bme280Endereco = BME280_ADDRESS_1;
-    Serial.println("✓ BME280 encontrado em 0x76!");
-  } else {
-    // Tentar endereço 0x77
-    Serial.println("Tentando BME280 em 0x77...");
-    if (bme280.begin(BME280_ADDRESS_2)) {
-      estado.bme280Endereco = BME280_ADDRESS_2;
-      Serial.println("✓ BME280 encontrado em 0x77!");
+  // Tentar endereço 0x76 primeiro (mais comum em módulos) com retry
+  bool bmeEncontrado = false;
+  for (int tentativa = 1; tentativa <= 3 && !bmeEncontrado; tentativa++) {
+    Serial.printf("Tentando BME280 em 0x76 (tentativa %d/3)...\n", tentativa);
+    if (bme280.begin(BME280_ADDRESS_1)) {
+      estado.bme280Endereco = BME280_ADDRESS_1;
+      Serial.println("✓ BME280 encontrado em 0x76!");
+      bmeEncontrado = true;
     } else {
-      Serial.println("✗ Não foi possível encontrar o BME280!");
-      Serial.println("  Nenhum BME280 em 0x76 ou 0x77");
-      Serial.println("Verifique a conexão do sensor:");
-      Serial.println("  SDA -> GPIO 21");
-      Serial.println("  SCL -> GPIO 22");
-      Serial.println("  VCC -> 3.3V");
-      Serial.println("  GND -> GND");
-      Serial.println("⚠ Continuando sem BME280...");
-      return;
+      Serial.println("Tentando BME280 em 0x77...");
+      if (bme280.begin(BME280_ADDRESS_2)) {
+        estado.bme280Endereco = BME280_ADDRESS_2;
+        Serial.println("✓ BME280 encontrado em 0x77!");
+        bmeEncontrado = true;
+      } else if (tentativa < 3) {
+        Serial.println("  ⚠ Falhou, reiniciando I2C...");
+        Wire.end();
+        delay(100);
+        Wire.begin(SDA_PIN, SCL_PIN);
+        delay(200);
+      }
     }
+  }
+  
+  if (!bmeEncontrado) {
+    Serial.println("✗ Não foi possível encontrar o BME280!");
+    Serial.println("  Nenhum BME280 em 0x76 ou 0x77");
+    Serial.println("Verifique a conexão do sensor:");
+    Serial.println("  SDA -> GPIO 21");
+    Serial.println("  SCL -> GPIO 22");
+    Serial.println("  VCC -> 3.3V");
+    Serial.println("  GND -> GND");
+    Serial.println("⚠ Continuando sem BME280...");
+    return;
   }
   
   estado.bme280Disponivel = true;
@@ -951,6 +967,11 @@ void lerSensoresBME280(bool forcado) {
     estado.ultimaTentativaBME280 = agora;
     
     Serial.println("[BME280] 🔄 Tentando reconectar...");
+    // Reiniciar I2C antes de tentar (resolve Error 263)
+    Wire.end();
+    delay(50);
+    Wire.begin(SDA_PIN, SCL_PIN);
+    delay(50);
     // Tentar ambos endereços
     if (bme280.begin(BME280_ADDRESS_1)) {
       estado.bme280Endereco = BME280_ADDRESS_1;
@@ -1049,50 +1070,88 @@ void lerSensorUV(bool forcado) {
   }
   
   if (forcado || millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
-    // SOLUÇÃO: Pausar SPI antes de ler ADC (SPI interfere com ADC no ESP32)
+    // SOLUÇÃO: Pausar SPI e aterrar pinos para eliminar ruído EMI
     SPI.end();
+    // Aterrar pinos SPI para não flutuarem (causam EMI no ADC de alta impedância)
+    pinMode(SD_CLK_PIN, OUTPUT);  digitalWrite(SD_CLK_PIN, LOW);   // GPIO18
+    pinMode(SD_MOSI_PIN, OUTPUT); digitalWrite(SD_MOSI_PIN, LOW);  // GPIO23
+    pinMode(SD_MISO_PIN, OUTPUT); digitalWrite(SD_MISO_PIN, LOW);  // GPIO19
+    pinMode(SD_CS_PIN, OUTPUT);   digitalWrite(SD_CS_PIN, LOW);    // GPIO5
     delay(10);
-    
+
     // Reconfigurar ADC1 do zero
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
     delay(5);
-    
-    // Descartar primeiras leituras (precisa de várias após SPI.end)
+
+    // Descartar primeiras leituras (estabilizar ADC)
     for (int d = 0; d < 10; d++) {
       adc1_get_raw(ADC1_CHANNEL_6);
       delay(1);
     }
-    
-    // Ler múltiplas amostras e calcular média
-    long somaUV = 0;
-    const int NUM_AMOSTRAS = 20;
+
+    // Ler amostras e usar MEDIANA (mais robusta que média contra ruído)
+    const int NUM_AMOSTRAS = 21;
+    int amostras[NUM_AMOSTRAS];
     for (int i = 0; i < NUM_AMOSTRAS; i++) {
-      somaUV += adc1_get_raw(ADC1_CHANNEL_6);
+      amostras[i] = adc1_get_raw(ADC1_CHANNEL_6);
       delayMicroseconds(500);
     }
-    estado.nivelUV = somaUV / NUM_AMOSTRAS;
-    
+    // Ordenar para mediana (insertion sort)
+    for (int i = 1; i < NUM_AMOSTRAS; i++) {
+      int chave = amostras[i];
+      int j = i - 1;
+      while (j >= 0 && amostras[j] > chave) {
+        amostras[j + 1] = amostras[j];
+        j--;
+      }
+      amostras[j + 1] = chave;
+    }
+    estado.nivelUV = amostras[NUM_AMOSTRAS / 2]; // Mediana
+
     // Reativar SPI para SD Card
     SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
     delay(5);
+
+    // Converter para índice UV usando tabela oficial GUVA-S12SD
+    // Tabela: Vout(mV) -> UV Index (com interpolação linear)
+    const float UV_OFFSET = 1.0; // Calibração indoor (luz UV difusa)
+    float tensao_mV = (estado.nivelUV / 4095.0) * 3300.0;
     
-    // Converter para índice UV
-    // GUVA-S12SD: saída analógica ~0.1V por índice UV
-    // Tensão = (nivelUV / 4095) * 3.3V
-    float tensao = (estado.nivelUV / 4095.0) * 3.3;
-    estado.indiceUV = tensao / 0.1; // Cada 0.1V ≈ 1 índice UV
+    // Tabela oficial: mV -> UV Index
+    const int tabela_mV[] =  {  50, 227, 318, 408, 503, 606, 696, 795, 881, 976, 1079, 1170 };
+    const int tabela_UV[]  =  {   0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,   11 };
+    const int TAB_SIZE = 12;
     
-    // Limitar a índice UV a máximo de 15
+    float indice = 0.0;
+    if (tensao_mV < tabela_mV[0]) {
+      indice = 0.0;
+    } else if (tensao_mV >= tabela_mV[TAB_SIZE - 1]) {
+      indice = 11.0;
+    } else {
+      for (int i = 0; i < TAB_SIZE - 1; i++) {
+        if (tensao_mV >= tabela_mV[i] && tensao_mV < tabela_mV[i + 1]) {
+          // Interpolação linear entre pontos da tabela
+          float frac = (float)(tensao_mV - tabela_mV[i]) / (tabela_mV[i + 1] - tabela_mV[i]);
+          indice = tabela_UV[i] + frac * (tabela_UV[i + 1] - tabela_UV[i]);
+          break;
+        }
+      }
+    }
+    estado.indiceUV = indice + UV_OFFSET;
+
+    // Limitar índice UV ao máximo de 15
     if (estado.indiceUV > 15) estado.indiceUV = 15;
-    
+
     Serial.print("[UV] ☀️ ADC: ");
     Serial.print(estado.nivelUV);
     Serial.print(" | Tensão: ");
-    Serial.print(tensao, 2);
-    Serial.print("V | Índice UV: ");
+    Serial.print(tensao_mV, 0);
+    Serial.print("mV | Índice UV: ");
     Serial.println(estado.indiceUV, 2);
-    
+
     estado.ultimaLeituraUV = millis();
   }
 }
