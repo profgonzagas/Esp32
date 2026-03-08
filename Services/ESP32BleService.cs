@@ -18,6 +18,8 @@ public class ESP32BleService
     private IBluetoothLE? _ble;
     private IAdapter? _adapter;
     private TaskCompletionSource<string>? _respostaEsperada;
+    private StringBuilder _bleBuffer = new StringBuilder();
+    private System.Timers.Timer? _bleBufferTimer;
     
     public bool IsScanning => _isScanning;
     public bool IsConectado => _isConnected;
@@ -245,6 +247,17 @@ public class ESP32BleService
                 return false;
             }
             
+            // Negociar MTU maior para receber pacotes maiores
+            try
+            {
+                await _connectedDevice.RequestMtuAsync(185);
+                System.Diagnostics.Debug.WriteLine("[BLE] MTU negociado com sucesso");
+            }
+            catch (Exception mtuEx)
+            {
+                System.Diagnostics.Debug.WriteLine($"[BLE] ⚠ MTU negociação falhou (usando padrão): {mtuEx.Message}");
+            }
+            
             // Subscrever notificações na característica TX (a que envia dados do ESP32)
             if (_txCharacteristic.CanUpdate)
             {
@@ -277,17 +290,34 @@ public class ESP32BleService
         {
             if (e.Characteristic.Value != null)
             {
-                var mensagem = Encoding.UTF8.GetString(e.Characteristic.Value);
-                System.Diagnostics.Debug.WriteLine($"[BLE] <<< Notificação recebida: {mensagem}");
+                var chunk = Encoding.UTF8.GetString(e.Characteristic.Value);
+                System.Diagnostics.Debug.WriteLine($"[BLE] <<< Chunk recebido ({chunk.Length} bytes): {chunk}");
                 
-                // Se estamos aguardando resposta, completar a Task
-                if (_respostaEsperada != null && !_respostaEsperada.Task.IsCompleted)
+                // Acumular chunks no buffer
+                _bleBuffer.Append(chunk);
+                
+                // Resetar timer de reassembly (espera 100ms sem novo chunk para considerar completo)
+                _bleBufferTimer?.Stop();
+                _bleBufferTimer?.Dispose();
+                _bleBufferTimer = new System.Timers.Timer(100);
+                _bleBufferTimer.AutoReset = false;
+                _bleBufferTimer.Elapsed += (s, args) =>
                 {
-                    _respostaEsperada.TrySetResult(mensagem);
-                }
-                
-                // Disparar evento também
-                OnMensagemRecebida?.Invoke(this, mensagem);
+                    var mensagem = _bleBuffer.ToString();
+                    _bleBuffer.Clear();
+                    
+                    System.Diagnostics.Debug.WriteLine($"[BLE] <<< Mensagem completa ({mensagem.Length} bytes): {mensagem}");
+                    
+                    // Se estamos aguardando resposta, completar a Task
+                    if (_respostaEsperada != null && !_respostaEsperada.Task.IsCompleted)
+                    {
+                        _respostaEsperada.TrySetResult(mensagem);
+                    }
+                    
+                    // Disparar evento também
+                    OnMensagemRecebida?.Invoke(this, mensagem);
+                };
+                _bleBufferTimer.Start();
             }
         }
         catch (Exception ex)
@@ -300,7 +330,7 @@ public class ESP32BleService
     {
         try
         {
-            if (_connectedDevice != null)
+            if (_connectedDevice != null && _adapter != null)
             {
                 // Parar notificações da característica TX (a que tem notify)
                 if (_txCharacteristic != null && _txCharacteristic.CanUpdate)

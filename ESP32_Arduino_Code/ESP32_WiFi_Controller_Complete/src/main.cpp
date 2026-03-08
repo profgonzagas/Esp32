@@ -302,19 +302,18 @@ void inicializarBME280() {
   estado.bme280Disponivel = true;
   Serial.println("✓ BME280 inicializado com sucesso!");
   
-  // Configurar o sensor para modo normal
+  // Configurar o sensor em modo normal com filtro IIR para suavizar ruído
   bme280.setSampling(Adafruit_BME280::MODE_NORMAL,
                      Adafruit_BME280::SAMPLING_X2,  // temperatura
                      Adafruit_BME280::SAMPLING_X16, // pressão
                      Adafruit_BME280::SAMPLING_X2,  // umidade
-                     Adafruit_BME280::FILTER_X16,
-                     Adafruit_BME280::STANDBY_MS_0_5);
+                     Adafruit_BME280::FILTER_X4,
+                     Adafruit_BME280::STANDBY_MS_500);
   
-  // Fazer leitura de teste
-  delay(100);
+  delay(100); // Aguardar primeira medição em modo normal
   float testTemp = bme280.readTemperature();
-  float testUmid = bme280.readHumidity();
   float testPress = bme280.readPressure() / 100.0F;
+  float testUmid = bme280.readHumidity();
   
   Serial.print("  Teste - T: ");
   Serial.print(testTemp, 1);
@@ -975,10 +974,22 @@ void lerSensoresBME280(bool forcado) {
     // Tentar ambos endereços
     if (bme280.begin(BME280_ADDRESS_1)) {
       estado.bme280Endereco = BME280_ADDRESS_1;
+      bme280.setSampling(Adafruit_BME280::MODE_NORMAL,
+                         Adafruit_BME280::SAMPLING_X2,
+                         Adafruit_BME280::SAMPLING_X16,
+                         Adafruit_BME280::SAMPLING_X2,
+                         Adafruit_BME280::FILTER_X4,
+                         Adafruit_BME280::STANDBY_MS_500);
       Serial.println("[BME280] ✓ Reconectado em 0x76!");
       estado.bme280Disponivel = true;
     } else if (bme280.begin(BME280_ADDRESS_2)) {
       estado.bme280Endereco = BME280_ADDRESS_2;
+      bme280.setSampling(Adafruit_BME280::MODE_NORMAL,
+                         Adafruit_BME280::SAMPLING_X2,
+                         Adafruit_BME280::SAMPLING_X16,
+                         Adafruit_BME280::SAMPLING_X2,
+                         Adafruit_BME280::FILTER_X4,
+                         Adafruit_BME280::STANDBY_MS_500);
       Serial.println("[BME280] ✓ Reconectado em 0x77!");
       estado.bme280Disponivel = true;
     } else {
@@ -988,28 +999,67 @@ void lerSensoresBME280(bool forcado) {
   }
   
   if (forcado || millis() - estado.ultimaLeituraTemp >= estado.INTERVALO_LEITURA) {
-    float temp = bme280.readTemperature();
-    float umid = bme280.readHumidity();
-    float press = bme280.readPressure() / 100.0F; // Converter Pa para hPa
+    // Múltiplas leituras com mediana para eliminar glitches I2C
+    const int NUM_LEITURAS = 5;
+    float temps[NUM_LEITURAS], umids[NUM_LEITURAS], presss[NUM_LEITURAS];
+    int leituras_validas = 0;
     
-    // Validar leituras (NaN = falha de comunicação I2C)
-    if (!isnan(temp) && !isnan(umid) && !isnan(press)) {
-      estado.temperatura_bme280 = temp;
-      estado.umidade_bme280 = umid;
-      estado.pressao = press;
+    for (int i = 0; i < NUM_LEITURAS; i++) {
+      // Ler na ordem: T → P → U
+      float t = bme280.readTemperature();
+      float p = bme280.readPressure() / 100.0F;
+      float u = bme280.readHumidity();
+      
+      if (i < NUM_LEITURAS - 1) delay(20); // Pequeno intervalo entre leituras
+      
+      // Validar: NaN e faixa do BME280 (spec: T -40~85, U 0~100, P 300~1100)
+      if (!isnan(t) && !isnan(u) && !isnan(p) &&
+          t >= -40.0 && t <= 85.0 &&
+          u >= 0.0 && u <= 100.0 &&
+          p >= 300.0 && p <= 1100.0) {
+        temps[leituras_validas] = t;
+        umids[leituras_validas] = u;
+        presss[leituras_validas] = p;
+        leituras_validas++;
+      }
+    }
+    
+    if (leituras_validas >= 3) {
+      // Ordenar e pegar mediana (insertion sort)
+      for (int i = 1; i < leituras_validas; i++) {
+        float kt = temps[i], ku = umids[i], kp = presss[i];
+        int j = i - 1;
+        while (j >= 0 && temps[j] > kt) { temps[j+1] = temps[j]; umids[j+1] = umids[j]; presss[j+1] = presss[j]; j--; }
+        temps[j+1] = kt; umids[j+1] = ku; presss[j+1] = kp;
+      }
+      int mid = leituras_validas / 2;
+      estado.temperatura_bme280 = temps[mid];
+      estado.umidade_bme280 = umids[mid];
+      estado.pressao = presss[mid];
       
       estado.ultimaLeituraTemp = millis();
       
-      Serial.print("[BME280] 🌡 Temperatura: ");
-      Serial.print(estado.temperatura_bme280, 1);
-      Serial.print(" °C | 💧 Umidade: ");
-      Serial.print(estado.umidade_bme280, 1);
-      Serial.print(" % | 🔽 Pressão: ");
-      Serial.print(estado.pressao, 2);
-      Serial.println(" hPa");
+      Serial.printf("[BME280] T:%.1f°C U:%.1f%% P:%.2fhPa (%d/%d válidas)\n",
+        estado.temperatura_bme280, estado.umidade_bme280, estado.pressao,
+        leituras_validas, NUM_LEITURAS);
+    } else if (leituras_validas > 0) {
+      // Poucas leituras válidas - usar a primeira válida mas avisar
+      estado.temperatura_bme280 = temps[0];
+      estado.umidade_bme280 = umids[0];
+      estado.pressao = presss[0];
+      estado.ultimaLeituraTemp = millis();
+      Serial.printf("[BME280] ⚠ Apenas %d/%d válidas - T:%.1f U:%.1f P:%.2f\n",
+        leituras_validas, NUM_LEITURAS, temps[0], umids[0], presss[0]);
     } else {
-      Serial.println("[BME280] ⚠ Leitura inválida (NaN) - sensor com problema de comunicação");
-      estado.bme280Disponivel = false; // Forçar reconexão na próxima tentativa
+      Serial.printf("[BME280] ⚠ 0/%d válidas (NaN ou fora de range) - mantendo valores anteriores\n", NUM_LEITURAS);
+      // Após 3 falhas consecutivas, forçar reconexão
+      static int falhas_consecutivas = 0;
+      falhas_consecutivas++;
+      if (falhas_consecutivas >= 3) {
+        Serial.println("[BME280] ✗ Muitas falhas - forçando reconexão");
+        estado.bme280Disponivel = false;
+        falhas_consecutivas = 0;
+      }
     }
   }
 }
@@ -1268,33 +1318,27 @@ void processarComandoBLE(String comando) {
     resposta = "Rele 2 desligado";
   }
   else if (comando == "GET_STATUS" || comando == "STATUS") {
-    // Forçar leitura imediata de todos os sensores
-    lerSensoresBME280(true);
-    delay(100); // Delay para DHT22 processar
-    lerSensoresDHT22(true);
-    lerSensorUV(true);
-    resposta = "LED:" + String(estado.led) + 
+    // Usar valores em cache - leitura forçada bloqueia demais e causa timeout BLE
+    // Os sensores são lidos periodicamente no loop() principal
+    resposta = "L:" + String(estado.led) + 
                ",R1:" + String(estado.rele1) + 
                ",R2:" + String(estado.rele2) +
-               ",T_BME:" + String(estado.temperatura_bme280, 1) +
-               ",U_BME:" + String(estado.umidade_bme280, 1) +
+               ",T:" + String(estado.temperatura_bme280, 1) +
+               ",U:" + String(estado.umidade_bme280, 1) +
                ",P:" + String(estado.pressao, 1) +
-               ",T_DHT:" + String(estado.temperatura_dht22, 1) +
-               ",U_DHT:" + String(estado.umidade_dht22, 1) +
+               ",T2:" + String(estado.temperatura_dht22, 1) +
+               ",U2:" + String(estado.umidade_dht22, 1) +
                ",UV:" + String(estado.indiceUV, 1);
   }
   else if (comando == "GET_SENSORS" || comando == "SENSORES") {
-    // Forçar leitura imediata de todos os sensores
-    Serial.println("[BLE] GET_SENSORS - Forçando leitura de todos os sensores...");
-    lerSensoresBME280(true);
-    delay(100); // Delay para DHT22 processar
-    lerSensoresDHT22(true);
-    lerSensorUV(true);
-    resposta = "TEMP:" + String(estado.temperatura_bme280, 1) + 
-               ",UMID:" + String(estado.umidade_bme280, 1) +
-               ",PRESS:" + String(estado.pressao, 1) +
-               ",TEMP2:" + String(estado.temperatura_dht22, 1) +
-               ",UMID2:" + String(estado.umidade_dht22, 1) +
+    // Usar valores em cache - leitura forçada com takeForcedMeasurement() bloqueia
+    // ~500ms (5x mediana) e causa timeout BLE
+    // Os sensores são lidos periodicamente no loop() principal
+    resposta = "T:" + String(estado.temperatura_bme280, 1) + 
+               ",U:" + String(estado.umidade_bme280, 1) +
+               ",P:" + String(estado.pressao, 1) +
+               ",T2:" + String(estado.temperatura_dht22, 1) +
+               ",U2:" + String(estado.umidade_dht22, 1) +
                ",UV:" + String(estado.indiceUV, 1);
   }
   else if (comando == "DIAGNOSTICO") {
@@ -1378,9 +1422,26 @@ void processarComandoBLE(String comando) {
  */
 void enviarRespostaBLE(String mensagem) {
   if (bleDeviceConnected) {
-    pTxCharacteristic->setValue(mensagem.c_str());
-    pTxCharacteristic->notify();
-    Serial.print("[BLE] Enviado: ");
+    // BLE MTU padrão ~20 bytes de payload. Enviar em chunks para não truncar.
+    const int CHUNK_SIZE = 20;
+    int len = mensagem.length();
+    
+    if (len <= CHUNK_SIZE) {
+      pTxCharacteristic->setValue(mensagem.c_str());
+      pTxCharacteristic->notify();
+    } else {
+      // Enviar em partes com delimitador de continuação
+      for (int offset = 0; offset < len; offset += CHUNK_SIZE) {
+        String chunk = mensagem.substring(offset, min(offset + CHUNK_SIZE, len));
+        pTxCharacteristic->setValue(chunk.c_str());
+        pTxCharacteristic->notify();
+        delay(30); // Dar tempo ao stack BLE entre notificações
+      }
+    }
+    
+    Serial.print("[BLE] Enviado (");
+    Serial.print(len);
+    Serial.print(" bytes): ");
     Serial.println(mensagem);
   }
 }

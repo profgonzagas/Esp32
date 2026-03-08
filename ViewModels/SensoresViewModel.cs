@@ -117,8 +117,9 @@ public class SensoresViewModel : BaseViewModel
     
     private DadosSensores? ParseSensorData(string mensagem)
     {
-        // Formato do ESP32: "TEMP:25.5,UMID:60.0,PRESS:1013.2,TEMP2:24.8,UMID2:58.0,UV:2.1"
-        // Ou formato GET_STATUS: "LED:1,R1:0,R2:0,T_BME:25.5,U_BME:60.0,P:1013.2,T_DHT:24.8,U_DHT:58.0,UV:2.1"
+        // Formato ESP32 BLE: "T:25.5,U:60.0,P:1013.2,T2:24.8,U2:58.0,UV:2.1"
+        // Formato GET_STATUS: "L:1,R1:0,R2:0,T:25.5,U:60.0,P:1013.2,T2:24.8,U2:58.0,UV:2.1"
+        // Formatos legados também aceitos: TEMP, UMID, PRESS, T_BME, U_BME, etc.
         if (string.IsNullOrWhiteSpace(mensagem))
             return null;
             
@@ -139,10 +140,12 @@ public class SensoresViewModel : BaseViewModel
             
             switch (chave)
             {
+                case "T":
                 case "TEMP":
                 case "T_BME":
                     dados.Temperatura = valor;
                     break;
+                case "U":
                 case "UMID":
                 case "U_BME":
                     dados.Umidade = valor;
@@ -151,10 +154,12 @@ public class SensoresViewModel : BaseViewModel
                 case "P":
                     dados.Pressao = valor;
                     break;
+                case "T2":
                 case "TEMP2":
                 case "T_DHT":
                     dados.TemperaturaDHT22 = valor;
                     break;
+                case "U2":
                 case "UMID2":
                 case "U_DHT":
                     dados.UmidadeDHT22 = valor;
