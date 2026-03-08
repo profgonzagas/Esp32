@@ -29,6 +29,7 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <driver/adc.h>
+#include <esp_adc_cal.h>
 
 // ==================== CONFIGURAÇÕES DE REDE ====================
 const char* ssid = "NecroSENSE";          // Altere para seu WiFi
@@ -184,7 +185,7 @@ void inicializarSensorUV() {
   
   // Usar API de baixo nível para ADC1 (compatível com WiFi)
   adc1_config_width(ADC_WIDTH_BIT_12);
-  adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+  adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_12);
   delay(100);
   
   // Teste de leitura
@@ -1131,33 +1132,46 @@ void lerSensorUV(bool forcado) {
 
     // Reconfigurar ADC1 do zero
     adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
-    delay(5);
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_12);
+    delay(10);
 
-    // Descartar primeiras leituras (estabilizar ADC)
-    for (int d = 0; d < 10; d++) {
+    // Calibração ADC (como o componente esp_s12sd do ESP-IDF faz)
+    // Ref: https://github.com/K0I05/ESP32-S3_ESP-IDF_COMPONENTS
+    // O ADC do ESP32 é não-linear; calibração converte raw -> mV com precisão
+    esp_adc_cal_characteristics_t adc_chars;
+    esp_adc_cal_value_t cal_type = esp_adc_cal_characterize(
+      ADC_UNIT_1, ADC_ATTEN_DB_12, ADC_WIDTH_BIT_12, 1100, &adc_chars);
+    
+    bool calibrado = (cal_type == ESP_ADC_CAL_VAL_EFUSE_TP || 
+                      cal_type == ESP_ADC_CAL_VAL_EFUSE_VREF);
+    Serial.printf("[UV] Calibração ADC: %s\n", 
+      cal_type == ESP_ADC_CAL_VAL_EFUSE_TP ? "Two Point (eFuse)" :
+      cal_type == ESP_ADC_CAL_VAL_EFUSE_VREF ? "Vref (eFuse)" : "Default Vref");
+
+    // Descartar primeiras leituras (estabilizar ADC após reconfiguração)
+    for (int d = 0; d < 20; d++) {
       adc1_get_raw(ADC1_CHANNEL_6);
-      delay(1);
+      delay(2);
     }
 
-    // Ler amostras e usar MEDIANA (mais robusta que média contra ruído)
-    const int NUM_AMOSTRAS = 21;
-    int amostras[NUM_AMOSTRAS];
+    // Ler 1000 amostras com calibração (como esp_s12sd e ma2shita/GUVA-S12SD)
+    const int NUM_AMOSTRAS = 1000;
+    long soma_mV = 0;
+    int soma_raw = 0;
+    int minRaw = 4095, maxRaw = 0;
     for (int i = 0; i < NUM_AMOSTRAS; i++) {
-      amostras[i] = adc1_get_raw(ADC1_CHANNEL_6);
-      delayMicroseconds(500);
+      int raw = adc1_get_raw(ADC1_CHANNEL_6);
+      // Converter raw para mV usando calibração (corrige não-linearidade do ADC)
+      uint32_t mV = esp_adc_cal_raw_to_voltage(raw, &adc_chars);
+      soma_mV += mV;
+      soma_raw += raw;
+      if (raw < minRaw) minRaw = raw;
+      if (raw > maxRaw) maxRaw = raw;
+      delay(2);
     }
-    // Ordenar para mediana (insertion sort)
-    for (int i = 1; i < NUM_AMOSTRAS; i++) {
-      int chave = amostras[i];
-      int j = i - 1;
-      while (j >= 0 && amostras[j] > chave) {
-        amostras[j + 1] = amostras[j];
-        j--;
-      }
-      amostras[j + 1] = chave;
-    }
-    estado.nivelUV = amostras[NUM_AMOSTRAS / 2]; // Mediana
+    float media_raw = (float)soma_raw / NUM_AMOSTRAS;
+    float tensao_mV = (float)soma_mV / NUM_AMOSTRAS;
+    estado.nivelUV = (int)media_raw;
 
     // Reativar SPI para SD Card
     SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
@@ -1165,42 +1179,36 @@ void lerSensorUV(bool forcado) {
     digitalWrite(SD_CS_PIN, HIGH);
     delay(5);
 
-    // Converter para índice UV usando tabela oficial GUVA-S12SD
-    // Tabela: Vout(mV) -> UV Index (com interpolação linear)
-    const float UV_OFFSET = 1.0; // Calibração indoor (luz UV difusa)
-    float tensao_mV = (estado.nivelUV / 4095.0) * 3300.0;
-    
-    // Tabela oficial: mV -> UV Index
+    // Converter mV calibrado para índice UV
+    // Tabela oficial GUVA-S12SD (mesma do componente esp_s12sd):
+    // mV faixas: 0-49=UV0, 50-227=UV1, 228-318=UV2, etc.
     const int tabela_mV[] =  {  50, 227, 318, 408, 503, 606, 696, 795, 881, 976, 1079, 1170 };
     const int tabela_UV[]  =  {   0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,   11 };
     const int TAB_SIZE = 12;
     
     float indice = 0.0;
     if (tensao_mV < tabela_mV[0]) {
-      indice = 0.0;
+      indice = 0.0; // Abaixo de 50mV = sem UV significativo
     } else if (tensao_mV >= tabela_mV[TAB_SIZE - 1]) {
       indice = 11.0;
     } else {
       for (int i = 0; i < TAB_SIZE - 1; i++) {
         if (tensao_mV >= tabela_mV[i] && tensao_mV < tabela_mV[i + 1]) {
-          // Interpolação linear entre pontos da tabela
           float frac = (float)(tensao_mV - tabela_mV[i]) / (tabela_mV[i + 1] - tabela_mV[i]);
           indice = tabela_UV[i] + frac * (tabela_UV[i + 1] - tabela_UV[i]);
           break;
         }
       }
     }
-    estado.indiceUV = indice + UV_OFFSET;
+    estado.indiceUV = indice;
 
-    // Limitar índice UV ao máximo de 15
     if (estado.indiceUV > 15) estado.indiceUV = 15;
 
-    Serial.print("[UV] ☀️ ADC: ");
-    Serial.print(estado.nivelUV);
-    Serial.print(" | Tensão: ");
-    Serial.print(tensao_mV, 0);
-    Serial.print("mV | Índice UV: ");
-    Serial.println(estado.indiceUV, 2);
+    Serial.println("[UV] ===== LEITURA UV DETALHADA =====");
+    Serial.printf("[UV] ADC raw média: %.1f (min:%d max:%d amostras:%d)\n", media_raw, minRaw, maxRaw, NUM_AMOSTRAS);
+    Serial.printf("[UV] Tensão calibrada: %.1f mV (cal:%s)\n", tensao_mV, calibrado ? "eFuse" : "default");
+    Serial.printf("[UV] Índice UV: %.2f\n", estado.indiceUV);
+    Serial.println("[UV] ================================");
 
     estado.ultimaLeituraUV = millis();
   }
