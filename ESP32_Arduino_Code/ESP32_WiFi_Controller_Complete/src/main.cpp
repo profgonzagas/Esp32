@@ -53,7 +53,7 @@ const int PORT = 80;
 #define BME280_ADDRESS_2 0x77 // Endereço I2C do BME280 (SDO -> VCC)
 #define DHT22_PIN 4         // DHT22 em GPIO 4
 #define DHTTYPE DHT22       // Usar DHT22
-#define UV_PIN 34           // GUVA-S12SD em GPIO 34 (Analógico)
+#define UV_PIN 32           // GUVA-S12SD em GPIO 32 (Analógico)
 // Pinos do SD Card (SPI)
 #define SD_CS_PIN 5         // Chip Select em GPIO 5 AMARELO
 #define SD_CLK_PIN 18       // Clock em GPIO 18 (SCK) AZUL
@@ -185,11 +185,11 @@ void inicializarSensorUV() {
   
   // Usar API de baixo nível para ADC1 (compatível com WiFi)
   adc1_config_width(ADC_WIDTH_BIT_12);
-  adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_12);
+  adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_12);
   delay(100);
   
   // Teste de leitura
-  int testUV = adc1_get_raw(ADC1_CHANNEL_6);
+  int testUV = adc1_get_raw(ADC1_CHANNEL_4);
   if (testUV >= 0) {
     estado.uvDisponivel = true;
     Serial.println("✓ Sensor UV inicializado com sucesso!");
@@ -1132,7 +1132,7 @@ void lerSensorUV(bool forcado) {
 
     // Reconfigurar ADC1 do zero
     adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_12);
     delay(10);
 
     // Calibração ADC (como o componente esp_s12sd do ESP-IDF faz)
@@ -1148,9 +1148,14 @@ void lerSensorUV(bool forcado) {
       cal_type == ESP_ADC_CAL_VAL_EFUSE_TP ? "Two Point (eFuse)" :
       cal_type == ESP_ADC_CAL_VAL_EFUSE_VREF ? "Vref (eFuse)" : "Default Vref");
 
+    // Diagnóstico: ler com analogRead direto para comparar
+    int diagRaw = analogRead(UV_PIN);
+    int diagAdc1 = adc1_get_raw(ADC1_CHANNEL_4);
+    Serial.printf("[UV] DIAG: analogRead(32)=%d  adc1_get_raw(CH4)=%d\n", diagRaw, diagAdc1);
+
     // Descartar primeiras leituras (estabilizar ADC após reconfiguração)
     for (int d = 0; d < 20; d++) {
-      adc1_get_raw(ADC1_CHANNEL_6);
+      adc1_get_raw(ADC1_CHANNEL_4);
       delay(2);
     }
 
@@ -1160,7 +1165,7 @@ void lerSensorUV(bool forcado) {
     int soma_raw = 0;
     int minRaw = 4095, maxRaw = 0;
     for (int i = 0; i < NUM_AMOSTRAS; i++) {
-      int raw = adc1_get_raw(ADC1_CHANNEL_6);
+      int raw = adc1_get_raw(ADC1_CHANNEL_4);
       // Converter raw para mV usando calibração (corrige não-linearidade do ADC)
       uint32_t mV = esp_adc_cal_raw_to_voltage(raw, &adc_chars);
       soma_mV += mV;
@@ -1173,11 +1178,35 @@ void lerSensorUV(bool forcado) {
     float tensao_mV = (float)soma_mV / NUM_AMOSTRAS;
     estado.nivelUV = (int)media_raw;
 
+    // Se raw ≈ 0, ignorar offset da calibração eFuse (~142mV com raw=0)
+    if (media_raw < 5.0) {
+      tensao_mV = 0.0;
+    }
+
+    // Detectar pino flutuante (cabo desconectado): variância alta = ruído, não UV real
+    int spread = maxRaw - minRaw;
+    if (spread > 200 && media_raw < 500) {
+      Serial.printf("[UV] ⚠ Pino flutuante detectado (spread:%d) - ignorando leitura\n", spread);
+      tensao_mV = 0.0;
+      media_raw = 0.0;
+      estado.nivelUV = 0;
+    }
+
     // Reativar SPI para SD Card
     SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
     pinMode(SD_CS_PIN, OUTPUT);
     digitalWrite(SD_CS_PIN, HIGH);
-    delay(5);
+    delay(10);
+    // Forçar reinicialização do SD remontando se estava conectado
+    if (estado.cartaoSDconectado) {
+      SD.end();
+      delay(5);
+      if (!SD.begin(SD_CS_PIN, SPI, 2000000)) {
+        Serial.println("[UV] ⚠ SD Card falhou após leitura UV - marcado para retry");
+        estado.cartaoSDconectado = false;
+        estado.nomeArquivoCSV = "";
+      }
+    }
 
     // Converter mV calibrado para índice UV
     // Tabela oficial GUVA-S12SD (mesma do componente esp_s12sd):
