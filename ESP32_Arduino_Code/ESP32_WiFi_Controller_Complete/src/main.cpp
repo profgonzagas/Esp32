@@ -77,10 +77,6 @@ unsigned long ultimoBlink = 0;
 bool ledBlinkState = false;
 const unsigned long INTERVALO_BLINK = 500; // Pisca a cada 500ms
 
-// BLE response queue (desacopla envio do callback onWrite para evitar reentrância)
-volatile bool blePendingFlag = false;
-String blePendingResponse = "";
-
 // Estados dos periféricos
 struct Estado {
   bool led = false;
@@ -529,9 +525,13 @@ void gravarDadosSD() {
     if (estado.nomeArquivoCSV == "") return;
   }
   
-  // Usar valores em cache (atualizados no loop principal) - não forçar leitura
-  // para evitar SPI cycling (UV) no meio de uma operação SD que causa
-  // instabilidade/corrupção, e bloquear o loop por 2 segundos desnecessariamente
+  // Forçar leitura atualizada de todos os sensores antes de gravar
+  lerSensoresBME280(true);
+  delay(50); // Aguardar I2C do BME280 completar
+  lerSensoresDHT22(true);
+  delay(50);
+  lerSensorUV(true);
+
   Serial.printf("[SD_CARD] Valores para gravação: BME280(T:%.2f U:%.2f P:%.2f) DHT22(T:%.2f U:%.2f) UV(%.1f)\n",
     estado.temperatura_bme280, estado.umidade_bme280, estado.pressao,
     estado.temperatura_dht22, estado.umidade_dht22, estado.indiceUV);
@@ -1149,13 +1149,13 @@ void lerSensorUV(bool forcado) {
       cal_type == ESP_ADC_CAL_VAL_EFUSE_VREF ? "Vref (eFuse)" : "Default Vref");
 
     // Descartar primeiras leituras (estabilizar ADC após reconfiguração)
-    for (int d = 0; d < 10; d++) {
+    for (int d = 0; d < 20; d++) {
       adc1_get_raw(ADC1_CHANNEL_6);
-      delay(1);
+      delay(2);
     }
 
-    // Ler 200 amostras com calibração (~200ms, suficiente para precisão)
-    const int NUM_AMOSTRAS = 200;
+    // Ler 1000 amostras com calibração (como esp_s12sd e ma2shita/GUVA-S12SD)
+    const int NUM_AMOSTRAS = 1000;
     long soma_mV = 0;
     int soma_raw = 0;
     int minRaw = 4095, maxRaw = 0;
@@ -1167,7 +1167,7 @@ void lerSensorUV(bool forcado) {
       soma_raw += raw;
       if (raw < minRaw) minRaw = raw;
       if (raw > maxRaw) maxRaw = raw;
-      delay(1);
+      delay(2);
     }
     float media_raw = (float)soma_raw / NUM_AMOSTRAS;
     float tensao_mV = (float)soma_mV / NUM_AMOSTRAS;
@@ -1399,7 +1399,12 @@ void processarComandoBLE(String comando) {
     if (!estado.cartaoSDconectado) {
       resposta = "SD_GRAVAR:Erro_SD_Desconectado";
     } else {
-      // Usar valores em cache (não chamar lerSensorUV aqui: 200ms de bloqueio no BLE task)
+      // Forçar leitura dos sensores primeiro
+      lerSensoresBME280(true);
+      delay(100);
+      lerSensoresDHT22(true);
+      lerSensorUV(true);
+      
       estado.ultimaGravagemSD = 0;  // Resetar timer para forçar gravação
       gravarDadosSD();
       
@@ -1417,10 +1422,7 @@ void processarComandoBLE(String comando) {
     resposta = "Comando desconhecido: " + comando;
   }
   
-  // Armazenar resposta para envio no loop() principal, evitando reentrância
-  // na stack BLE (notify() dentro de onWrite() pode causar deadlock/erro)
-  blePendingResponse = resposta;
-  blePendingFlag = true;
+  enviarRespostaBLE(resposta);
 }
 
 /**
@@ -1564,13 +1566,6 @@ void loop() {
   
   // Gerenciar BLE (reconexão)
   gerenciarBLE();
-  
-  // Enviar resposta BLE pendente (desacoplado do callback onWrite para evitar reentrância)
-  if (blePendingFlag) {
-    String toSend = blePendingResponse;
-    blePendingFlag = false;
-    enviarRespostaBLE(toSend);
-  }
   
   // Verificar conexão WiFi
   verificarConexaoWiFi();
