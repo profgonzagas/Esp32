@@ -1,4 +1,3 @@
-
 /*  pio run --target upload -p COM5 ESP32_Arduino_Code/ESP32_WiFi_Controller_Complete/ESP32_WiFi_Controller_Complete.ino */
 // pio run --target upload 
 
@@ -28,8 +27,6 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
-#include <driver/adc.h>
-#include <esp_adc_cal.h>
 
 // ==================== CONFIGURAÇÕES DE REDE ====================
 const char* ssid = "NecroSENSE";          // Altere para seu WiFi
@@ -183,24 +180,17 @@ class MyBLECallbacks: public BLECharacteristicCallbacks {
 void inicializarSensorUV() {
   Serial.println("\n=== INICIALIZANDO SENSOR UV ===");
   
-  // Usar API de baixo nível para ADC1 (compatível com WiFi)
-  adc1_config_width(ADC_WIDTH_BIT_12);
-  adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_12);
+  // API Arduino pura (arduino-esp32 v3.x com calibração interna)
+  analogReadResolution(12);
+  analogSetPinAttenuation(UV_PIN, ADC_11db);
   delay(100);
   
   // Teste de leitura
-  int testUV = adc1_get_raw(ADC1_CHANNEL_4);
-  if (testUV >= 0) {
-    estado.uvDisponivel = true;
-    Serial.println("✓ Sensor UV inicializado com sucesso!");
-    Serial.println("  Pino: GPIO 34 (ADC1_CH6)");
-    Serial.println("  Faixa: 0-4095 (ADC 12-bit)");
-    Serial.print("  Leitura teste: ");
-    Serial.println(testUV);
-  } else {
-    Serial.println("⚠ Sensor UV não respondeu");
-    estado.uvDisponivel = false;
-  }
+  int testRaw = analogRead(UV_PIN);
+  int testMv  = analogReadMilliVolts(UV_PIN);
+  estado.uvDisponivel = true;
+  Serial.println("✓ Sensor UV inicializado (analogReadMilliVolts)");
+  Serial.printf("  Pino: GPIO %d | raw=%d | mV=%d\n", UV_PIN, testRaw, testMv);
 }
 
 /**
@@ -1115,61 +1105,24 @@ void lerSensoresDHT22(bool forcado) {
  * @param forcado Se true, força leitura imediata ignorando intervalo
  */
 void lerSensorUV(bool forcado) {
-  // Se não está disponível, tentar reconectar
   if (!estado.uvDisponivel) {
-    estado.uvDisponivel = true; // Sempre tentar ler
+    estado.uvDisponivel = true;
   }
   
   if (forcado || millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
-    // SOLUÇÃO: Pausar SPI e aterrar pinos para eliminar ruído EMI
-    SPI.end();
-    // Aterrar pinos SPI para não flutuarem (causam EMI no ADC de alta impedância)
-    pinMode(SD_CLK_PIN, OUTPUT);  digitalWrite(SD_CLK_PIN, LOW);   // GPIO18
-    pinMode(SD_MOSI_PIN, OUTPUT); digitalWrite(SD_MOSI_PIN, LOW);  // GPIO23
-    pinMode(SD_MISO_PIN, OUTPUT); digitalWrite(SD_MISO_PIN, LOW);  // GPIO19
-    pinMode(SD_CS_PIN, OUTPUT);   digitalWrite(SD_CS_PIN, LOW);    // GPIO5
-    delay(10);
+    // API Arduino pura - NÃO precisa desligar SPI (sem conflito no v3.x)
+    // Descartar primeiras leituras (estabilizar)
+    for (int d = 0; d < 10; d++) { analogRead(UV_PIN); delay(1); }
 
-    // Reconfigurar ADC1 do zero
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_12);
-    delay(10);
-
-    // Calibração ADC (como o componente esp_s12sd do ESP-IDF faz)
-    // Ref: https://github.com/K0I05/ESP32-S3_ESP-IDF_COMPONENTS
-    // O ADC do ESP32 é não-linear; calibração converte raw -> mV com precisão
-    esp_adc_cal_characteristics_t adc_chars;
-    esp_adc_cal_value_t cal_type = esp_adc_cal_characterize(
-      ADC_UNIT_1, ADC_ATTEN_DB_12, ADC_WIDTH_BIT_12, 1100, &adc_chars);
-    
-    bool calibrado = (cal_type == ESP_ADC_CAL_VAL_EFUSE_TP || 
-                      cal_type == ESP_ADC_CAL_VAL_EFUSE_VREF);
-    Serial.printf("[UV] Calibração ADC: %s\n", 
-      cal_type == ESP_ADC_CAL_VAL_EFUSE_TP ? "Two Point (eFuse)" :
-      cal_type == ESP_ADC_CAL_VAL_EFUSE_VREF ? "Vref (eFuse)" : "Default Vref");
-
-    // Diagnóstico: ler com analogRead direto para comparar
-    int diagRaw = analogRead(UV_PIN);
-    int diagAdc1 = adc1_get_raw(ADC1_CHANNEL_4);
-    Serial.printf("[UV] DIAG: analogRead(32)=%d  adc1_get_raw(CH4)=%d\n", diagRaw, diagAdc1);
-
-    // Descartar primeiras leituras (estabilizar ADC após reconfiguração)
-    for (int d = 0; d < 20; d++) {
-      adc1_get_raw(ADC1_CHANNEL_4);
-      delay(2);
-    }
-
-    // Ler 1000 amostras com calibração (como esp_s12sd e ma2shita/GUVA-S12SD)
-    const int NUM_AMOSTRAS = 1000;
+    const int NUM_AMOSTRAS = 64;
     long soma_mV = 0;
     int soma_raw = 0;
     int minRaw = 4095, maxRaw = 0;
     for (int i = 0; i < NUM_AMOSTRAS; i++) {
-      int raw = adc1_get_raw(ADC1_CHANNEL_4);
-      // Converter raw para mV usando calibração (corrige não-linearidade do ADC)
-      uint32_t mV = esp_adc_cal_raw_to_voltage(raw, &adc_chars);
-      soma_mV += mV;
+      int raw = analogRead(UV_PIN);
+      int mV  = analogReadMilliVolts(UV_PIN);
       soma_raw += raw;
+      soma_mV  += mV;
       if (raw < minRaw) minRaw = raw;
       if (raw > maxRaw) maxRaw = raw;
       delay(2);
@@ -1178,46 +1131,23 @@ void lerSensorUV(bool forcado) {
     float tensao_mV = (float)soma_mV / NUM_AMOSTRAS;
     estado.nivelUV = (int)media_raw;
 
-    // Se raw ≈ 0, ignorar offset da calibração eFuse (~142mV com raw=0)
-    if (media_raw < 5.0) {
-      tensao_mV = 0.0;
-    }
-
-    // Detectar pino flutuante (cabo desconectado): variância alta = ruído, não UV real
+    // Pino flutuante: ADC oscila em quase toda a faixa
     int spread = maxRaw - minRaw;
-    if (spread > 200 && media_raw < 500) {
-      Serial.printf("[UV] ⚠ Pino flutuante detectado (spread:%d) - ignorando leitura\n", spread);
+    if (spread > 3500) {
+      Serial.printf("[UV] ⚠ Pino flutuante (spread:%d)\n", spread);
       tensao_mV = 0.0;
       media_raw = 0.0;
       estado.nivelUV = 0;
     }
 
-    // Reativar SPI para SD Card
-    SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
-    pinMode(SD_CS_PIN, OUTPUT);
-    digitalWrite(SD_CS_PIN, HIGH);
-    delay(10);
-    // Forçar reinicialização do SD remontando se estava conectado
-    if (estado.cartaoSDconectado) {
-      SD.end();
-      delay(5);
-      if (!SD.begin(SD_CS_PIN, SPI, 2000000)) {
-        Serial.println("[UV] ⚠ SD Card falhou após leitura UV - marcado para retry");
-        estado.cartaoSDconectado = false;
-        estado.nomeArquivoCSV = "";
-      }
-    }
-
-    // Converter mV calibrado para índice UV
-    // Tabela oficial GUVA-S12SD (mesma do componente esp_s12sd):
-    // mV faixas: 0-49=UV0, 50-227=UV1, 228-318=UV2, etc.
+    // Tabela oficial GUVA-S12SD (mV -> índice UV)
     const int tabela_mV[] =  {  50, 227, 318, 408, 503, 606, 696, 795, 881, 976, 1079, 1170 };
     const int tabela_UV[]  =  {   0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,   11 };
     const int TAB_SIZE = 12;
     
     float indice = 0.0;
     if (tensao_mV < tabela_mV[0]) {
-      indice = 0.0; // Abaixo de 50mV = sem UV significativo
+      indice = 0.0;
     } else if (tensao_mV >= tabela_mV[TAB_SIZE - 1]) {
       indice = 11.0;
     } else {
@@ -1230,14 +1160,10 @@ void lerSensorUV(bool forcado) {
       }
     }
     estado.indiceUV = indice;
-
     if (estado.indiceUV > 15) estado.indiceUV = 15;
 
-    Serial.println("[UV] ===== LEITURA UV DETALHADA =====");
-    Serial.printf("[UV] ADC raw média: %.1f (min:%d max:%d amostras:%d)\n", media_raw, minRaw, maxRaw, NUM_AMOSTRAS);
-    Serial.printf("[UV] Tensão calibrada: %.1f mV (cal:%s)\n", tensao_mV, calibrado ? "eFuse" : "default");
-    Serial.printf("[UV] Índice UV: %.2f\n", estado.indiceUV);
-    Serial.println("[UV] ================================");
+    Serial.printf("[UV] raw=%.0f mV=%.1f UV=%.2f (min:%d max:%d)\n",
+                  media_raw, tensao_mV, estado.indiceUV, minRaw, maxRaw);
 
     estado.ultimaLeituraUV = millis();
   }

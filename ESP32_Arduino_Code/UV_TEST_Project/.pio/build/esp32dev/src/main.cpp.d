@@ -132,7 +132,4 @@
  C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/spi_flash/include/esp_spi_flash_counters.h \
  C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_hw_support/include/soc/esp32/spiram.h \
  C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
- C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
- C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/driver/include/driver/adc.h \
- C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/hal/include/hal/adc_types.h \
- C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_adc_cal/include/esp_adc_cal.h
+ C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h
