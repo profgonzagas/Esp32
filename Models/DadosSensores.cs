@@ -14,6 +14,12 @@ public class DadosSensores
     // UV (GUVA-S12SD: Radiação UV)
     public int NivelUV { get; set; }
     public float IndiceUV { get; set; }
+
+    // LDR (HW-072: Luminosidade)
+    public int LdrRaw { get; set; }
+    public int LdrMv { get; set; }
+    public float LdrPercentual { get; set; }
+    public string LdrDescricao { get; set; } = "N/A";
     
     // Outros sensores
     public int NivelGas { get; set; }
@@ -49,6 +55,17 @@ public class DadosSensores
         _ => "#9C27B0"        // Roxo
     };
     
+    // Propriedades calculadas - LDR
+    public string LdrPercentualFormatado => $"{LdrPercentual:F1}%";
+    public string CorLDR => LdrPercentual switch
+    {
+        < 10f  => "#607D8B",  // Cinza (escuro)
+        < 30f  => "#795548",  // Marrom (pouca luz)
+        < 60f  => "#FF9800",  // Laranja (moderado)
+        < 85f  => "#FFC107",  // Âmbar (forte)
+        _      => "#FFEB3B"   // Amarelo brilhante (muito forte)
+    };
+
     // Outras propriedades
     public bool AlertaGas => NivelGas > 1000;
     public string NivelGasTexto => AlertaGas ? "⚠ ALERTA" : "Normal";

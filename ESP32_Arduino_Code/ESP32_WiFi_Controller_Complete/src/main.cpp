@@ -8,6 +8,7 @@
  * - BME280: Temperatura, Umidade, Pressão (I2C)
  * - DHT22: Temperatura, Umidade (Digital)
  * - GUVA-S12SD: Radiação UV (Analógico)
+ * - LDR HW-072: Luminosidade (Analógico)
  * - Cartão SD: Logging de dados (SPI)
  * 
  * Este código cria um servidor HTTP no ESP32 com todos os sensores
@@ -51,6 +52,7 @@ const int PORT = 80;
 #define DHT22_PIN 4         // DHT22 em GPIO 4
 #define DHTTYPE DHT22       // Usar DHT22
 #define UV_PIN 32           // GUVA-S12SD em GPIO 32 (Analógico)
+#define LDR_PIN 35          // HW-072 LDR Luminosidade em GPIO 35 (Analógico, input-only)
 // Pinos do SD Card (SPI)
 #define SD_CS_PIN 5         // Chip Select em GPIO 5 AMARELO
 #define SD_CLK_PIN 18       // Clock em GPIO 18 (SCK) AZUL
@@ -93,6 +95,14 @@ struct Estado {
   int nivelUV = 0;           // 0-4095 (valor analógico 12-bit)
   float indiceUV = 0.0;      // Índice UV calculado (0-15)
   unsigned long ultimaLeituraUV = 0;
+  // LDR HW-072
+  bool ldrDisponivel = false;
+  int ldrRaw = 0;
+  int ldrMv = 0;
+  float ldrPercentual = 0.0;
+  String ldrDescricao = "N/A";
+  unsigned long ultimaLeituraLDR = 0;
+  const unsigned long INTERVALO_LDR = 30000;
   // SD Card
   bool cartaoSDconectado = false;
   unsigned long ultimaGravagemSD = 0;
@@ -109,7 +119,7 @@ struct Estado {
   unsigned long ultimaLeituraDHT22 = 0;
   const unsigned long INTERVALO_LEITURA = 30000; // 30 segundos
   const unsigned long INTERVALO_DHT22 = 30000;   // DHT22 requer ~30 segundos entre leituras
-  const unsigned long INTERVALO_UV = 30000;       // UV a cada 30 segundos
+  const unsigned long INTERVALO_UV = 30000;        // UV a cada 5 segundos (rápido para debug)
 };
 
 Estado estado;
@@ -123,6 +133,8 @@ void enviarRespostaBLE(String mensagem);
 void lerSensoresBME280(bool forcado = false);
 void lerSensoresDHT22(bool forcado = false);
 void lerSensorUV(bool forcado = false);
+void lerLDR(bool forcado = false);
+void inicializarLDR();
 void enviarJSON(String json);
 void handleStatus();
 void handleSensores();
@@ -173,6 +185,57 @@ class MyBLECallbacks: public BLECharacteristicCallbacks {
 };
 
 // ==================== FUNCÇÕES AUXILIARES ====================
+
+/**
+ * Inicializa o sensor de luminosidade LDR HW-072
+ */
+void inicializarLDR() {
+  Serial.println("\n=== INICIALIZANDO LDR HW-072 ===");
+  analogSetPinAttenuation(LDR_PIN, ADC_11db); // range 0-3.3V
+  delay(100);
+  int testRaw = analogRead(LDR_PIN);
+  int testMv  = analogReadMilliVolts(LDR_PIN);
+  estado.ldrDisponivel = true;
+  Serial.printf("✓ Sensor LDR inicializado (GPIO %d) - Raw: %d, mV: %d\n", LDR_PIN, testRaw, testMv);
+}
+
+/**
+ * Leitura do sensor de luminosidade LDR HW-072
+ * @param forcado Se true, força leitura imediata ignorando intervalo
+ */
+void lerLDR(bool forcado) {
+  if (!estado.ldrDisponivel) return;
+  if (!forcado && millis() - estado.ultimaLeituraLDR < estado.INTERVALO_LDR) return;
+
+  // Descartar primeiras leituras (estabilizar ADC)
+  for (int d = 0; d < 10; d++) { analogRead(LDR_PIN); delay(2); }
+
+  // Média de 50 amostras
+  const int amostras = 50;
+  long somaRaw = 0;
+  long somaMv  = 0;
+  for (int i = 0; i < amostras; i++) {
+    somaRaw += analogRead(LDR_PIN);
+    somaMv  += analogReadMilliVolts(LDR_PIN);
+    delay(2);
+  }
+  estado.ldrRaw = somaRaw / amostras;
+  estado.ldrMv  = somaMv  / amostras;
+
+  // Percentual: tensão alta = mais luz (LDR diminui resistência com luz)
+  estado.ldrPercentual = constrain((estado.ldrMv / 3300.0f) * 100.0f, 0.0f, 100.0f);
+
+  if      (estado.ldrPercentual < 10)  estado.ldrDescricao = "Escuro";
+  else if (estado.ldrPercentual < 30)  estado.ldrDescricao = "Pouca luz";
+  else if (estado.ldrPercentual < 60)  estado.ldrDescricao = "Luz moderada";
+  else if (estado.ldrPercentual < 85)  estado.ldrDescricao = "Luz forte";
+  else                                  estado.ldrDescricao = "Luz muito forte";
+
+  Serial.printf("[LDR] Raw: %d | mV: %d | %.1f%% | %s\n",
+    estado.ldrRaw, estado.ldrMv, estado.ldrPercentual, estado.ldrDescricao.c_str());
+
+  estado.ultimaLeituraLDR = millis();
+}
 
 /**
  * Inicializa o sensor UV GUVA-S12SD
@@ -480,7 +543,7 @@ void criarArquivoCSV() {
   if (!SD.exists(nomeArquivo)) {
     File arquivo = SD.open(nomeArquivo, FILE_WRITE);
     if (arquivo) {
-      arquivo.println("Timestamp;Temp_BME280;Umid_BME280;Pressao;Temp_DHT22;Umid_DHT22;Indice_UV");
+      arquivo.println("Timestamp;Temp_BME280;Umid_BME280;Pressao;Temp_DHT22;Umid_DHT22;Indice_UV;LDR_Raw;LDR_mV;LDR_Pct");
       arquivo.close();
       Serial.print("✓ Arquivo criado: ");
       Serial.println(nomeArquivo);
@@ -560,6 +623,12 @@ void gravarDadosSD() {
     linha += String(estado.umidade_dht22, 2);
     linha += ";";
     linha += String(estado.indiceUV, 1);
+    linha += ";";
+    linha += String(estado.ldrRaw);
+    linha += ";";
+    linha += String(estado.ldrMv);
+    linha += ";";
+    linha += String(estado.ldrPercentual, 1);
     
     size_t bytesEscritos = arquivo.println(linha);
     arquivo.flush();
@@ -714,7 +783,19 @@ void configurarRotas() {
     lerSensorUV();
     String response = "{\"status\":\"ok\",\"sensor\":\"GUVA-S12SD\",\"nivel_uv\":" + String(estado.nivelUV) + ",\"indice_uv\":" + String(estado.indiceUV, 2) + ",\"unidade\":\"UV\"}";
     enviarJSON(response);
-  });  
+  });
+
+  // Leitura de luminosidade LDR
+  server.on("/ldr", HTTP_GET, []() {
+    lerLDR(true);
+    String response = "{\"status\":\"ok\",\"sensor\":\"LDR HW-072\",\"pino\":" + String(LDR_PIN) +
+                      ",\"raw\":" + String(estado.ldrRaw) +
+                      ",\"mV\":" + String(estado.ldrMv) +
+                      ",\"luminosidade_pct\":" + String(estado.ldrPercentual, 1) +
+                      ",\"descricao\":\"" + estado.ldrDescricao + "\"}";
+    enviarJSON(response);
+  });
+
   // PWM
   server.on("/pwm", HTTP_GET, handlePWM);
   
@@ -820,7 +901,8 @@ void handleStatus() {
   json += "\"sensores\":{";
   json += "\"bme280\":{\"temperatura\":" + String(estado.temperatura_bme280, 2) + ",\"umidade\":" + String(estado.umidade_bme280, 2) + ",\"pressao\":" + String(estado.pressao, 2) + "},";
   json += "\"dht22\":{\"temperatura\":" + String(estado.temperatura_dht22, 2) + ",\"umidade\":" + String(estado.umidade_dht22, 2) + "},";
-  json += "\"uv\":{\"nivel\":" + String(estado.nivelUV) + ",\"indice\":" + String(estado.indiceUV, 2) + "}";
+  json += "\"uv\":{\"nivel\":" + String(estado.nivelUV) + ",\"indice\":" + String(estado.indiceUV, 2) + "},";
+  json += "\"ldr\":{\"raw\":" + String(estado.ldrRaw) + ",\"mV\":" + String(estado.ldrMv) + ",\"luminosidade_pct\":" + String(estado.ldrPercentual, 1) + ",\"descricao\":\"" + estado.ldrDescricao + "\"}";
   json += "},";
   json += "\"uptime\":" + String(millis() / 1000);
   json += "}";
@@ -842,6 +924,7 @@ void handleSensores() {
   json += "{\"nome\":\"Temperatura (DHT22)\",\"valor\":" + String(estado.temperatura_dht22, 2) + ",\"unidade\":\"°C\",\"icone\":\"🌡\"},";
   json += "{\"nome\":\"Umidade (DHT22)\",\"valor\":" + String(estado.umidade_dht22, 2) + ",\"unidade\":\"%\",\"icone\":\"💧\"},";
   json += "{\"nome\":\"Índice UV\",\"valor\":" + String(estado.indiceUV, 2) + ",\"unidade\":\"UV\",\"icone\":\"☀️\"},";
+  json += "{\"nome\":\"Luminosidade (LDR)\",\"valor\":" + String(estado.ldrPercentual, 1) + ",\"unidade\":\"%\",\"icone\":\"💡\",\"descricao\":\"" + estado.ldrDescricao + "\"},";
   json += "{\"nome\":\"LED\",\"valor\":" + String(estado.led ? "1" : "0") + ",\"unidade\":\"bool\",\"icone\":\"💡\"},";
   json += "{\"nome\":\"Relé 1\",\"valor\":" + String(estado.rele1 ? "1" : "0") + ",\"unidade\":\"bool\",\"icone\":\"🔌\"},";
   json += "{\"nome\":\"Relé 2\",\"valor\":" + String(estado.rele2 ? "1" : "0") + ",\"unidade\":\"bool\",\"icone\":\"🔌\"}";
@@ -1110,25 +1193,34 @@ void lerSensorUV(bool forcado) {
   }
   
   if (forcado || millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
-    // API Arduino pura - NÃO precisa desligar SPI (sem conflito no v3.x)
-    // Descartar primeiras leituras (estabilizar)
-    for (int d = 0; d < 10; d++) { analogRead(UV_PIN); delay(1); }
+    // Pausar SPI para eliminar ruído EMI no ADC (GPIO 32 é alta impedância)
+    SPI.end();
+    pinMode(SD_CLK_PIN, OUTPUT);  digitalWrite(SD_CLK_PIN, LOW);
+    pinMode(SD_MOSI_PIN, OUTPUT); digitalWrite(SD_MOSI_PIN, LOW);
+    pinMode(SD_MISO_PIN, OUTPUT); digitalWrite(SD_MISO_PIN, LOW);
+    pinMode(SD_CS_PIN, OUTPUT);   digitalWrite(SD_CS_PIN, LOW);
+    delay(10);
+
+    // Descartar primeiras leituras (estabilizar ADC)
+    for (int d = 0; d < 20; d++) { analogRead(UV_PIN); delay(2); }
 
     const int NUM_AMOSTRAS = 64;
-    long soma_mV = 0;
-    int soma_raw = 0;
+    long soma_raw = 0;
+    long soma_calMv = 0;
     int minRaw = 4095, maxRaw = 0;
     for (int i = 0; i < NUM_AMOSTRAS; i++) {
       int raw = analogRead(UV_PIN);
-      int mV  = analogReadMilliVolts(UV_PIN);
+      int calMv = analogReadMilliVolts(UV_PIN);
       soma_raw += raw;
-      soma_mV  += mV;
+      soma_calMv += calMv;
       if (raw < minRaw) minRaw = raw;
       if (raw > maxRaw) maxRaw = raw;
       delay(2);
     }
     float media_raw = (float)soma_raw / NUM_AMOSTRAS;
-    float tensao_mV = (float)soma_mV / NUM_AMOSTRAS;
+    float calMv_media = (float)soma_calMv / NUM_AMOSTRAS;
+    // Calcular mV direto do raw (sem offset eFuse)
+    float tensao_mV = media_raw * 3300.0f / 4095.0f;
     estado.nivelUV = (int)media_raw;
 
     // Pino flutuante: ADC oscila em quase toda a faixa
@@ -1138,6 +1230,25 @@ void lerSensorUV(bool forcado) {
       tensao_mV = 0.0;
       media_raw = 0.0;
       estado.nivelUV = 0;
+    }
+
+    // Diagnóstico: verificar GPIO 34 como referência (sem sensor)
+    int ref34 = analogRead(34);
+    int ref34mv = analogReadMilliVolts(34);
+
+    // Reativar SPI e SD Card
+    SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
+    delay(5);
+    if (estado.cartaoSDconectado) {
+      SD.end();
+      delay(5);
+      if (!SD.begin(SD_CS_PIN, SPI, 2000000)) {
+        Serial.println("[UV] ⚠ SD Card falhou após leitura UV");
+        estado.cartaoSDconectado = false;
+        estado.nomeArquivoCSV = "";
+      }
     }
 
     // Tabela oficial GUVA-S12SD (mV -> índice UV)
@@ -1162,8 +1273,9 @@ void lerSensorUV(bool forcado) {
     estado.indiceUV = indice;
     if (estado.indiceUV > 15) estado.indiceUV = 15;
 
-    Serial.printf("[UV] raw=%.0f mV=%.1f UV=%.2f (min:%d max:%d)\n",
-                  media_raw, tensao_mV, estado.indiceUV, minRaw, maxRaw);
+    Serial.printf("[UV] raw=%.0f rawMV=%.1f calMV=%.1f UV=%.2f (min:%d max:%d spread:%d)\n",
+                  media_raw, tensao_mV, calMv_media, estado.indiceUV, minRaw, maxRaw, spread);
+    Serial.printf("[UV] REF GPIO34: raw=%d calMV=%d (se igual a GPIO32 = offset eFuse)\n", ref34, ref34mv);
 
     estado.ultimaLeituraUV = millis();
   }
@@ -1466,6 +1578,7 @@ void setup() {
   inicializarBME280();
   inicializarDHT22();
   inicializarSensorUV();
+  inicializarLDR();
   
   // Inicializar SD Card
   inicializarCartaoSD();
@@ -1536,6 +1649,7 @@ void loop() {
     ultimaLeitura = millis();
     lerSensoresBME280();
     lerSensorUV();
+    lerLDR();
     
     // DHT22: tentar ler a cada 1 segundo até conseguir, depois a cada 30 segundos
     if (estado.temperatura_dht22 == 0.0 || estado.umidade_dht22 == 0.0) {

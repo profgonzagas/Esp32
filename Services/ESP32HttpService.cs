@@ -284,6 +284,22 @@ public class ESP32HttpService
                     if (uvElement.TryGetProperty("indice", out var indiceUV))
                         dados.IndiceUV = (float)indiceUV.GetDouble();
                 }
+
+                // Extrair dados LDR HW-072
+                if (sensoresElement.TryGetProperty("ldr", out var ldrElement))
+                {
+                    if (ldrElement.TryGetProperty("raw", out var ldrRaw))
+                        dados.LdrRaw = ldrRaw.GetInt32();
+
+                    if (ldrElement.TryGetProperty("mV", out var ldrMv))
+                        dados.LdrMv = ldrMv.GetInt32();
+
+                    if (ldrElement.TryGetProperty("luminosidade_pct", out var ldrPct))
+                        dados.LdrPercentual = (float)ldrPct.GetDouble();
+
+                    if (ldrElement.TryGetProperty("descricao", out var ldrDesc))
+                        dados.LdrDescricao = ldrDesc.GetString() ?? "N/A";
+                }
             }
             
             dados.UltimaAtualizacao = DateTime.Now;

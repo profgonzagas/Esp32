@@ -167,6 +167,9 @@ public class SensoresViewModel : BaseViewModel
                 case "UV":
                     dados.IndiceUV = valor;
                     break;
+                case "LDR":
+                    dados.LdrPercentual = valor;
+                    break;
             }
         }
         
