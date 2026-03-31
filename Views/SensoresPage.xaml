@@ -26,11 +26,19 @@
                    TextColor="{AppThemeBinding Light=#555555, Dark=#CCCCCC}"/>
             
             <!-- Botões de Controle -->
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+            <Grid ColumnDefinitions="*,Auto,*" ColumnSpacing="10">
                 <Button Text="🔄 Atualizar" 
                         Command="{Binding AtualizarCommand}"
                         IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}"/>
-                <Button Grid.Column="1" 
+                <Button Grid.Column="1"
+                        Text="🌐 MQTT"
+                        Command="{Binding ConectarMQTTCommand}"
+                        BackgroundColor="{Binding MqttConectado, Converter={StaticResource BoolToColorConverter}}"
+                        TextColor="White"
+                        WidthRequest="90"
+                        CornerRadius="8"
+                        IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}"/>
+                <Button Grid.Column="2" 
                         Text="{Binding AtualizacaoAutomatica, StringFormat='{0}'}"
                         Clicked="OnToggleAutoUpdate"
                         BackgroundColor="{Binding AtualizacaoAutomatica, Converter={StaticResource BoolToColorConverter}}"/>

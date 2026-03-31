@@ -8,11 +8,14 @@ public class SensoresViewModel : BaseViewModel
 {
     private readonly ESP32HttpService _httpService;
     private readonly ESP32BleService _bleService;
+    private readonly MqttService _mqttService;
     private bool _usarWiFi = false; // BLE por padrão (mais usado)
+    private bool _usarMQTT = false;
     private DadosSensores? _dados;
     private bool _atualizacaoAutomatica = false;
     private string _statusMensagem = "";
     private bool _bleResponseReceived;
+    private bool _mqttConectado;
     
     public bool UsarWiFi
     {
@@ -22,6 +25,22 @@ public class SensoresViewModel : BaseViewModel
             SetProperty(ref _usarWiFi, value);
             OnPropertyChanged(nameof(ModoTexto));
         }
+    }
+    
+    public bool UsarMQTT
+    {
+        get => _usarMQTT;
+        set
+        {
+            SetProperty(ref _usarMQTT, value);
+            OnPropertyChanged(nameof(ModoTexto));
+        }
+    }
+    
+    public bool MqttConectado
+    {
+        get => _mqttConectado;
+        set => SetProperty(ref _mqttConectado, value);
     }
     
     public DadosSensores? Dados
@@ -42,7 +61,7 @@ public class SensoresViewModel : BaseViewModel
         set => SetProperty(ref _statusMensagem, value);
     }
     
-    public string ModoTexto => UsarWiFi ? "📶 WiFi" : "📱 BLE";
+    public string ModoTexto => UsarMQTT ? "🌐 MQTT" : UsarWiFi ? "📶 WiFi" : "📱 BLE";
     
     public bool AtualizacaoAutomatica
     {
@@ -57,25 +76,49 @@ public class SensoresViewModel : BaseViewModel
     
     public ICommand AtualizarCommand { get; }
     public ICommand AlternarModoCommand { get; }
+    public ICommand ConectarMQTTCommand { get; }
     
-    public SensoresViewModel(ESP32HttpService httpService, ESP32BleService bleService)
+    public SensoresViewModel(ESP32HttpService httpService, ESP32BleService bleService, MqttService mqttService)
     {
         _httpService = httpService;
         _bleService = bleService;
+        _mqttService = mqttService;
         
         Titulo = "Sensores";
         
         AtualizarCommand = new Command(async () => await AtualizarDadosAsync());
-        AlternarModoCommand = new Command(() => UsarWiFi = !UsarWiFi);
+        AlternarModoCommand = new Command(AlternarModo);
+        ConectarMQTTCommand = new Command(async () => await ConectarMQTTAsync());
         
         // Subscrever evento BLE para receber dados dos sensores
         _bleService.OnMensagemRecebida += OnDadosBLERecebidos;
+        
+        // Subscrever evento MQTT para receber dados dos sensores
+        _mqttService.OnDadosSensoresRecebidos += OnDadosMQTTRecebidos;
+        _mqttService.OnStatusConexaoChanged += (s, conectado) =>
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                MqttConectado = conectado;
+                if (conectado)
+                    StatusMensagem = "🌐 MQTT conectado - dados em tempo real";
+                else if (UsarMQTT)
+                    StatusMensagem = "⚠ MQTT desconectado";
+            });
+        };
         
         // Iniciar com dados zerados
         Dados = new DadosSensores();
         
         // Auto-detectar modo
-        if (_bleService.IsConectado)
+        if (_mqttService.IsConectado)
+        {
+            StatusMensagem = "🌐 MQTT conectado - dados em tempo real";
+            _usarMQTT = true;
+            _usarWiFi = false;
+            _mqttConectado = true;
+        }
+        else if (_bleService.IsConectado)
         {
             StatusMensagem = "📱 BLE conectado - clique Atualizar";
             _usarWiFi = false;
@@ -87,8 +130,73 @@ public class SensoresViewModel : BaseViewModel
         }
         else
         {
-            StatusMensagem = "⚠ Conecte via BLE ou WiFi primeiro";
+            StatusMensagem = "⚠ Conecte via BLE, WiFi ou MQTT";
         }
+    }
+    
+    private void AlternarModo()
+    {
+        // Ciclar: BLE -> WiFi -> MQTT -> BLE
+        if (!UsarWiFi && !UsarMQTT)
+        {
+            UsarWiFi = true;
+            UsarMQTT = false;
+        }
+        else if (UsarWiFi && !UsarMQTT)
+        {
+            UsarWiFi = false;
+            UsarMQTT = true;
+        }
+        else
+        {
+            UsarWiFi = false;
+            UsarMQTT = false;
+        }
+    }
+    
+    private async Task ConectarMQTTAsync()
+    {
+        if (_mqttService.IsConectado)
+        {
+            await _mqttService.DesconectarAsync();
+            StatusMensagem = "🌐 MQTT desconectado";
+            return;
+        }
+        
+        StatusMensagem = "🌐 Conectando ao MQTT...";
+        IsBusy = true;
+        
+        try
+        {
+            var ok = await _mqttService.ConectarAsync();
+            if (ok)
+            {
+                UsarMQTT = true;
+                UsarWiFi = false;
+                StatusMensagem = "🌐 MQTT conectado! Dados serão recebidos automaticamente";
+            }
+            else
+            {
+                StatusMensagem = "❌ Falha ao conectar MQTT - verifique configurações";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMensagem = $"❌ Erro MQTT: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+    
+    private void OnDadosMQTTRecebidos(object? sender, DadosSensores dados)
+    {
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            Dados = dados;
+            StatusMensagem = $"🌐 MQTT - Atualizado {dados.UltimaAtualizacao:HH:mm:ss}";
+        });
     }
     
     private void OnDadosBLERecebidos(object? sender, string mensagem)
@@ -188,8 +296,31 @@ public class SensoresViewModel : BaseViewModel
         {
             bool sucesso = false;
             
+            // MQTT mode: solicitar sensores via MQTT
+            if (UsarMQTT)
+            {
+                if (_mqttService.IsConectado)
+                {
+                    sucesso = await _mqttService.SolicitarSensoresAsync();
+                    if (sucesso)
+                    {
+                        StatusMensagem = "🌐 Solicitação MQTT enviada...";
+                        // Dados chegam via callback OnDadosMQTTRecebidos
+                        await Task.Delay(2000); // Esperar resposta
+                        sucesso = Dados?.UltimaAtualizacao > DateTime.Now.AddSeconds(-5);
+                    }
+                    else
+                    {
+                        StatusMensagem = "❌ Falha ao enviar via MQTT";
+                    }
+                }
+                else
+                {
+                    StatusMensagem = "⚠ MQTT não conectado - clique 🌐 para conectar";
+                }
+            }
             // Tentar modo selecionado primeiro, cair para outro se falhar
-            if (!UsarWiFi || !_httpService.IsConectado)
+            else if (!UsarWiFi || !_httpService.IsConectado)
             {
                 // Tentar BLE
                 if (_bleService.IsConectado)

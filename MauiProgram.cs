@@ -35,6 +35,7 @@ public static class MauiProgram
 			builder.Services.AddSingleton<ESP32HttpService>();
 			builder.Services.AddSingleton<ESP32BleService>();
 			builder.Services.AddSingleton<ConfiguracaoService>();
+			builder.Services.AddSingleton<MqttService>();
 			
 			System.Diagnostics.Debug.WriteLine("[MAUI] Services registrados com sucesso");
 			System.Diagnostics.Debug.WriteLine("[MAUI] Registrando ViewModels...");

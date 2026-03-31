@@ -120,6 +120,90 @@
                 </VerticalStackLayout>
             </Frame>
             
+            <!-- Configurações MQTT (HiveMQ Cloud) -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="16">
+                    <HorizontalStackLayout Spacing="8">
+                        <Label Text="🌐 MQTT (HiveMQ Cloud)"
+                               FontSize="16"
+                               FontAttributes="Bold"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        <Frame CornerRadius="12" Padding="6,2" 
+                               BackgroundColor="{Binding MqttConectado, Converter={StaticResource BoolToColorConverter}}"
+                               HasShadow="False">
+                            <Label Text="{Binding MqttConectado, StringFormat='{0}'}"
+                                   FontSize="10" TextColor="White"/>
+                        </Frame>
+                    </HorizontalStackLayout>
+                    
+                    <Label Text="Envie dados dos sensores pela internet via MQTT"
+                           FontSize="12"
+                           TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                    
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="Broker (Endereço do Cluster)"
+                               FontSize="12"
+                               TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                        <Entry Placeholder="xxxx.s1.eu.hivemq.cloud"
+                               Text="{Binding MqttBroker}"
+                               BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    </VerticalStackLayout>
+                    
+                    <Grid ColumnDefinitions="*,120" ColumnSpacing="12">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Usuário"
+                                   FontSize="12"
+                                   TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                            <Entry Placeholder="necrosense"
+                                   Text="{Binding MqttUsuario}"
+                                   BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                                   TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        </VerticalStackLayout>
+                        
+                        <VerticalStackLayout Grid.Column="1" Spacing="4">
+                            <Label Text="Porta"
+                                   FontSize="12"
+                                   TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                            <Entry Placeholder="8883"
+                                   Text="{Binding MqttPorta}"
+                                   Keyboard="Numeric"
+                                   BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                                   TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                        </VerticalStackLayout>
+                    </Grid>
+                    
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="Senha"
+                               FontSize="12"
+                               TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"/>
+                        <Entry Placeholder="Senha do HiveMQ"
+                               Text="{Binding MqttSenha}"
+                               IsPassword="True"
+                               BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#0F3460}"
+                               TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    </VerticalStackLayout>
+                    
+                    <Button Text="{Binding MqttConectado, StringFormat='🌐 {0:Desconectar MQTT;Conectar MQTT;Conectar MQTT}'}"
+                            Command="{Binding TestarMQTTCommand}"
+                            BackgroundColor="#FF6F00"
+                            TextColor="White"
+                            CornerRadius="8"
+                            IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}"/>
+                    
+                    <Frame CornerRadius="8" Padding="10" 
+                           BackgroundColor="{AppThemeBinding Light=#FFF3E0, Dark=#3E2723}" 
+                           BorderColor="#FF6F00">
+                        <Label Text="Crie uma conta grátis em hivemq.com/mqtt-cloud-broker para obter o endereço do cluster, usuário e senha."
+                               FontSize="11" Opacity="0.8" LineBreakMode="WordWrap"
+                               TextColor="{AppThemeBinding Light=#BF360C, Dark=#FFCC80}"/>
+                    </Frame>
+                </VerticalStackLayout>
+            </Frame>
+            
             <!-- Botões de Ação -->
             <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
                    CornerRadius="12"

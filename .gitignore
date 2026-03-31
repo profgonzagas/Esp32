@@ -3,6 +3,9 @@ bin/
 obj/
 out/
 
+# Credenciais sensíveis (WiFi, MQTT)
+ESP32_Arduino_Code/**/src/secrets.h
+
 # Visual Studio
 .vs/
 *.user
