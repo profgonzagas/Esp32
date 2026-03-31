@@ -2,6 +2,7 @@
 using ESP32Controller.Services;
 using ESP32Controller.ViewModels;
 using ESP32Controller.Views;
+using Microcharts.Maui;
 
 namespace ESP32Controller;
 
@@ -21,6 +22,7 @@ public static class MauiProgram
 		
 		builder
 			.UseMauiApp<App>()
+			.UseMicrocharts()
 			.ConfigureFonts(fonts =>
 			{
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
@@ -46,6 +48,7 @@ public static class MauiProgram
 			builder.Services.AddTransient<BLEControlViewModel>();
 			builder.Services.AddTransient<ConfiguracoesViewModel>();
 			builder.Services.AddTransient<SensoresViewModel>();
+			builder.Services.AddTransient<GraficosViewModel>();
 			
 			System.Diagnostics.Debug.WriteLine("[MAUI] ViewModels registrados com sucesso");
 			System.Diagnostics.Debug.WriteLine("[MAUI] Registrando Pages...");
@@ -56,6 +59,7 @@ public static class MauiProgram
 			builder.Services.AddTransient<BLEControlPage>();
 			builder.Services.AddTransient<ConfiguracoesPage>();
 			builder.Services.AddTransient<SensoresPage>();
+			builder.Services.AddTransient<Views.GraficosPage>();
 			
 			System.Diagnostics.Debug.WriteLine("[MAUI] Pages registradas com sucesso");
 

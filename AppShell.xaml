@@ -32,6 +32,11 @@
             ContentTemplate="{DataTemplate views:SensoresPage}"/>
         
         <ShellContent
+            Title="Gráficos"
+            Icon="dotnet_bot.png"
+            ContentTemplate="{DataTemplate views:GraficosPage}"/>
+        
+        <ShellContent
             Title="Config"
             Icon="settings.png"
             ContentTemplate="{DataTemplate views:ConfiguracoesPage}"/>

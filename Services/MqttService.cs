@@ -28,6 +28,16 @@ public class MqttService : IDisposable
     
     public bool IsConectado => _mqttClient?.IsConnected ?? false;
     
+    // Histórico de leituras para gráficos (últimas 60 leituras = ~30min a cada 30s)
+    private const int MAX_HISTORICO = 60;
+    private readonly List<DadosSensores> _historico = new();
+    private readonly object _historicoLock = new();
+    
+    public IReadOnlyList<DadosSensores> Historico
+    {
+        get { lock (_historicoLock) return _historico.ToList(); }
+    }
+    
     // Eventos
     public event EventHandler<DadosSensores>? OnDadosSensoresRecebidos;
     public event EventHandler<string>? OnStatusRecebido;
@@ -254,6 +264,20 @@ public class MqttService : IDisposable
             {
                 dados.NivelUV = uv.GetProperty("nivel").GetInt32();
                 dados.IndiceUV = uv.GetProperty("indice").GetSingle();
+            }
+            
+            if (root.TryGetProperty("luminosidade", out var ldr))
+            {
+                dados.LdrRaw = ldr.GetProperty("nivel").GetInt32();
+                dados.LdrPercentual = ldr.GetProperty("percentual").GetSingle();
+            }
+            
+            // Acumular no histórico
+            lock (_historicoLock)
+            {
+                _historico.Add(dados);
+                if (_historico.Count > MAX_HISTORICO)
+                    _historico.RemoveAt(0);
             }
             
             return dados;

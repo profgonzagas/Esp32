@@ -22,6 +22,8 @@
             <converters:ChamaToBackgroundConverter x:Key="ChamaToBackgroundConverter"/>
             <converters:ChamaToDetailBackgroundConverter x:Key="ChamaToDetailBackgroundConverter"/>
             <converters:BoolToColorConverter x:Key="BoolToColorConverter"/>
+            <converters:BoolToTextConverter x:Key="BoolToTextConverter"/>
+            <converters:ObjectToBoolConverter x:Key="ObjectToBoolConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

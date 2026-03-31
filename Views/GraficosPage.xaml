@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:ESP32Controller.ViewModels"
+             xmlns:micro="clr-namespace:Microcharts.Maui;assembly=Microcharts.Maui"
+             x:Class="ESP32Controller.Views.GraficosPage"
+             x:DataType="vm:GraficosViewModel"
+             Title="Gráficos"
+             BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1A1A2E}">
+    
+    <ScrollView>
+        <VerticalStackLayout Spacing="12" Padding="16">
+            
+            <!-- Header MQTT Status -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12" Padding="12" HasShadow="True">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                    <Label Text="{Binding StatusMensagem}"
+                           FontSize="14"
+                           TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"
+                           VerticalOptions="Center"/>
+                    <Button Grid.Column="1"
+                            Text="{Binding MqttConectado, Converter={StaticResource BoolToTextConverter}}"
+                            Command="{Binding ConectarMQTTCommand}"
+                            BackgroundColor="{Binding MqttConectado, Converter={StaticResource BoolToColorConverter}}"
+                            TextColor="White"
+                            FontSize="12"
+                            CornerRadius="8"
+                            Padding="12,6"
+                            HeightRequest="36"/>
+                </Grid>
+            </Frame>
+            
+            <!-- Cards de valores atuais -->
+            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8"
+                  IsVisible="{Binding UltimoDado, Converter={StaticResource ObjectToBoolConverter}}">
+                <Frame Grid.Column="0" BackgroundColor="#FF5722" CornerRadius="10" Padding="10" HasShadow="False">
+                    <VerticalStackLayout HorizontalOptions="Center">
+                        <Label Text="🌡" FontSize="20" HorizontalOptions="Center"/>
+                        <Label Text="{Binding UltimoDado.TemperaturaFormatada}" FontSize="14" TextColor="White" FontAttributes="Bold" HorizontalOptions="Center"/>
+                        <Label Text="Temp" FontSize="10" TextColor="#FFFFFF99" HorizontalOptions="Center"/>
+                    </VerticalStackLayout>
+                </Frame>
+                <Frame Grid.Column="1" BackgroundColor="#2196F3" CornerRadius="10" Padding="10" HasShadow="False">
+                    <VerticalStackLayout HorizontalOptions="Center">
+                        <Label Text="💧" FontSize="20" HorizontalOptions="Center"/>
+                        <Label Text="{Binding UltimoDado.UmidadeFormatada}" FontSize="14" TextColor="White" FontAttributes="Bold" HorizontalOptions="Center"/>
+                        <Label Text="Umid" FontSize="10" TextColor="#FFFFFF99" HorizontalOptions="Center"/>
+                    </VerticalStackLayout>
+                </Frame>
+                <Frame Grid.Column="2" BackgroundColor="#FFC107" CornerRadius="10" Padding="10" HasShadow="False">
+                    <VerticalStackLayout HorizontalOptions="Center">
+                        <Label Text="💡" FontSize="20" HorizontalOptions="Center"/>
+                        <Label Text="{Binding UltimoDado.LdrPercentualFormatado}" FontSize="14" TextColor="White" FontAttributes="Bold" HorizontalOptions="Center"/>
+                        <Label Text="Luz" FontSize="10" TextColor="#FFFFFF99" HorizontalOptions="Center"/>
+                    </VerticalStackLayout>
+                </Frame>
+            </Grid>
+            
+            <!-- Gráfico Temperatura -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12" Padding="12" HasShadow="True">
+                <VerticalStackLayout>
+                    <Label Text="🌡 Temperatura (BME280)" FontSize="16" FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    <micro:ChartView Chart="{Binding GraficoTemperatura}"
+                                     HeightRequest="180"
+                                     Margin="0,8,0,0"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Gráfico Umidade -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12" Padding="12" HasShadow="True">
+                <VerticalStackLayout>
+                    <Label Text="💧 Umidade (BME280)" FontSize="16" FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    <micro:ChartView Chart="{Binding GraficoUmidade}"
+                                     HeightRequest="180"
+                                     Margin="0,8,0,0"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Gráfico Pressão -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12" Padding="12" HasShadow="True">
+                <VerticalStackLayout>
+                    <Label Text="🔽 Pressão Atmosférica" FontSize="16" FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    <micro:ChartView Chart="{Binding GraficoPressao}"
+                                     HeightRequest="180"
+                                     Margin="0,8,0,0"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Gráfico UV -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12" Padding="12" HasShadow="True">
+                <VerticalStackLayout>
+                    <Label Text="☀️ Índice UV" FontSize="16" FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    <micro:ChartView Chart="{Binding GraficoUV}"
+                                     HeightRequest="180"
+                                     Margin="0,8,0,0"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Gráfico Luminosidade -->
+            <Frame BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#16213E}"
+                   CornerRadius="12" Padding="12" HasShadow="True">
+                <VerticalStackLayout>
+                    <Label Text="💡 Luminosidade (LDR)" FontSize="16" FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
+                    <micro:ChartView Chart="{Binding GraficoLuminosidade}"
+                                     HeightRequest="180"
+                                     Margin="0,8,0,0"/>
+                </VerticalStackLayout>
+            </Frame>
+            
+            <!-- Loading -->
+            <ActivityIndicator IsRunning="{Binding IsBusy}" IsVisible="{Binding IsBusy}"
+                               Color="#4CAF50" HeightRequest="40"/>
+            
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>
