@@ -1,20 +1,17 @@
-/*  pio run --target upload -p COM5 ESP32_Arduino_Code/ESP32_WiFi_Controller_Complete/ESP32_WiFi_Controller_Complete.ino */
-// pio run --target upload 
-
-/**
+/*
  * NecroSENSE - Código WiFi HTTP Completo para ESP32
  * 
  * Sensores Integrados:
  * - BME280: Temperatura, Umidade, Pressão (I2C)
  * - DHT22: Temperatura, Umidade (Digital)
  * - GUVA-S12SD: Radiação UV (Analógico)
- * - LDR HW-072: Luminosidade (Analógico)
  * - Cartão SD: Logging de dados (SPI)
  * 
  * Este código cria um servidor HTTP no ESP32 com todos os sensores
  * integrados e salvamento de dados em cartão SD
  */
 
+#include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
@@ -28,11 +25,28 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
+#include "secrets.h"  // Credenciais WiFi e MQTT (não commitado)
 
 // ==================== CONFIGURAÇÕES DE REDE ====================
-const char* ssid = "NecroSENSE";          // Altere para seu WiFi
-const char* password = "12345678";        // Altere para sua senha WiFi
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
 const int PORT = 80;
+
+// ==================== CONFIGURAÇÕES MQTT (HiveMQ Cloud) ====================
+const char* mqtt_server = MQTT_SERVER;
+const int mqtt_port = MQTT_PORT;
+const char* mqtt_user = MQTT_USER;
+const char* mqtt_password = MQTT_PASS;
+const char* mqtt_client_id = "ESP32_NecroSENSE";
+
+// Tópicos MQTT
+const char* MQTT_TOPIC_SENSORES = "necrosense/sensores";
+const char* MQTT_TOPIC_STATUS   = "necrosense/status";
+const char* MQTT_TOPIC_COMANDOS = "necrosense/comandos";
+const char* MQTT_TOPIC_RESPOSTA = "necrosense/resposta";
+const unsigned long MQTT_PUBLISH_INTERVAL = 30000; // Publicar a cada 30 segundos
 
 // ==================== CONFIGURAÇÕES BLE ====================
 #define BLE_DEVICE_NAME "ESP32_BLE_001"
@@ -51,8 +65,8 @@ const int PORT = 80;
 #define BME280_ADDRESS_2 0x77 // Endereço I2C do BME280 (SDO -> VCC)
 #define DHT22_PIN 4         // DHT22 em GPIO 4
 #define DHTTYPE DHT22       // Usar DHT22
-#define UV_PIN 32           // GUVA-S12SD em GPIO 32 (Analógico)
-#define LDR_PIN 35          // HW-072 LDR Luminosidade em GPIO 35 (Analógico, input-only)
+#define UV_PIN 34           // GUVA-S12SD em GPIO 34 (Analógico)
+#define LDR_PIN 35          // LDR HW-072 em GPIO 35 (Analógico)
 // Pinos do SD Card (SPI)
 #define SD_CS_PIN 5         // Chip Select em GPIO 5 AMARELO
 #define SD_CLK_PIN 18       // Clock em GPIO 18 (SCK) AZUL
@@ -70,6 +84,14 @@ BLECharacteristic* pTxCharacteristic;
 BLECharacteristic* pRxCharacteristic;
 bool bleDeviceConnected = false;
 bool bleOldDeviceConnected = false;
+
+// MQTT
+WiFiClientSecure espClient;
+PubSubClient mqttClient(espClient);
+unsigned long ultimaPublicacaoMQTT = 0;
+unsigned long ultimaTentativaMQTT = 0;
+const unsigned long INTERVALO_RETRY_MQTT = 5000; // Retry a cada 5s
+bool mqttConectado = false;
 
 // LED Blink
 unsigned long ultimoBlink = 0;
@@ -95,14 +117,11 @@ struct Estado {
   int nivelUV = 0;           // 0-4095 (valor analógico 12-bit)
   float indiceUV = 0.0;      // Índice UV calculado (0-15)
   unsigned long ultimaLeituraUV = 0;
-  // LDR HW-072
+  // LDR - Luminosidade
   bool ldrDisponivel = false;
-  int ldrRaw = 0;
-  int ldrMv = 0;
-  float ldrPercentual = 0.0;
-  String ldrDescricao = "N/A";
+  int nivelLDR = 0;            // 0-4095 (valor analógico 12-bit)
+  float luminosidade = 0.0;    // Percentual 0-100%
   unsigned long ultimaLeituraLDR = 0;
-  const unsigned long INTERVALO_LDR = 30000;
   // SD Card
   bool cartaoSDconectado = false;
   unsigned long ultimaGravagemSD = 0;
@@ -119,7 +138,8 @@ struct Estado {
   unsigned long ultimaLeituraDHT22 = 0;
   const unsigned long INTERVALO_LEITURA = 30000; // 30 segundos
   const unsigned long INTERVALO_DHT22 = 30000;   // DHT22 requer ~30 segundos entre leituras
-  const unsigned long INTERVALO_UV = 30000;        // UV a cada 5 segundos (rápido para debug)
+  const unsigned long INTERVALO_UV = 30000;       // UV a cada 30 segundos
+  const unsigned long INTERVALO_LDR = 30000;      // LDR a cada 30 segundos
 };
 
 Estado estado;
@@ -133,8 +153,7 @@ void enviarRespostaBLE(String mensagem);
 void lerSensoresBME280(bool forcado = false);
 void lerSensoresDHT22(bool forcado = false);
 void lerSensorUV(bool forcado = false);
-void lerLDR(bool forcado = false);
-void inicializarLDR();
+void lerSensorLDR(bool forcado = false);
 void enviarJSON(String json);
 void handleStatus();
 void handleSensores();
@@ -154,9 +173,16 @@ void inicializarBLE();
 void inicializarBME280();
 void inicializarDHT22();
 void inicializarSensorUV();
+void inicializarSensorLDR();
 void verificarConexaoWiFi();
 void gerenciarBLE();
 void piscarLED();
+void inicializarMQTT();
+void conectarMQTT();
+void publicarSensoresMQTT();
+void publicarStatusMQTT();
+void callbackMQTT(char* topic, byte* payload, unsigned int length);
+void gerenciarMQTT();
 
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -187,73 +213,50 @@ class MyBLECallbacks: public BLECharacteristicCallbacks {
 // ==================== FUNCÇÕES AUXILIARES ====================
 
 /**
- * Inicializa o sensor de luminosidade LDR HW-072
- */
-void inicializarLDR() {
-  Serial.println("\n=== INICIALIZANDO LDR HW-072 ===");
-  analogSetPinAttenuation(LDR_PIN, ADC_11db); // range 0-3.3V
-  delay(100);
-  int testRaw = analogRead(LDR_PIN);
-  int testMv  = analogReadMilliVolts(LDR_PIN);
-  estado.ldrDisponivel = true;
-  Serial.printf("✓ Sensor LDR inicializado (GPIO %d) - Raw: %d, mV: %d\n", LDR_PIN, testRaw, testMv);
-}
-
-/**
- * Leitura do sensor de luminosidade LDR HW-072
- * @param forcado Se true, força leitura imediata ignorando intervalo
- */
-void lerLDR(bool forcado) {
-  if (!estado.ldrDisponivel) return;
-  if (!forcado && millis() - estado.ultimaLeituraLDR < estado.INTERVALO_LDR) return;
-
-  // Descartar primeiras leituras (estabilizar ADC)
-  for (int d = 0; d < 10; d++) { analogRead(LDR_PIN); delay(2); }
-
-  // Média de 50 amostras
-  const int amostras = 50;
-  long somaRaw = 0;
-  long somaMv  = 0;
-  for (int i = 0; i < amostras; i++) {
-    somaRaw += analogRead(LDR_PIN);
-    somaMv  += analogReadMilliVolts(LDR_PIN);
-    delay(2);
-  }
-  estado.ldrRaw = somaRaw / amostras;
-  estado.ldrMv  = somaMv  / amostras;
-
-  // Percentual: tensão alta = mais luz (LDR diminui resistência com luz)
-  estado.ldrPercentual = constrain((estado.ldrMv / 3300.0f) * 100.0f, 0.0f, 100.0f);
-
-  if      (estado.ldrPercentual < 10)  estado.ldrDescricao = "Escuro";
-  else if (estado.ldrPercentual < 30)  estado.ldrDescricao = "Pouca luz";
-  else if (estado.ldrPercentual < 60)  estado.ldrDescricao = "Luz moderada";
-  else if (estado.ldrPercentual < 85)  estado.ldrDescricao = "Luz forte";
-  else                                  estado.ldrDescricao = "Luz muito forte";
-
-  Serial.printf("[LDR] Raw: %d | mV: %d | %.1f%% | %s\n",
-    estado.ldrRaw, estado.ldrMv, estado.ldrPercentual, estado.ldrDescricao.c_str());
-
-  estado.ultimaLeituraLDR = millis();
-}
-
-/**
  * Inicializa o sensor UV GUVA-S12SD
  */
 void inicializarSensorUV() {
   Serial.println("\n=== INICIALIZANDO SENSOR UV ===");
-  
-  // API Arduino pura (arduino-esp32 v3.x com calibração interna)
-  analogReadResolution(12);
-  analogSetPinAttenuation(UV_PIN, ADC_11db);
+  pinMode(UV_PIN, INPUT);
+  analogSetPinAttenuation(UV_PIN, ADC_11db); // Faixa 0-3.3V explícita
   delay(100);
   
   // Teste de leitura
-  int testRaw = analogRead(UV_PIN);
-  int testMv  = analogReadMilliVolts(UV_PIN);
-  estado.uvDisponivel = true;
-  Serial.println("✓ Sensor UV inicializado (analogReadMilliVolts)");
-  Serial.printf("  Pino: GPIO %d | raw=%d | mV=%d\n", UV_PIN, testRaw, testMv);
+  int testUV = analogRead(UV_PIN);
+  if (testUV >= 0) {
+    estado.uvDisponivel = true;
+    Serial.println("✓ Sensor UV inicializado com sucesso!");
+    Serial.println("  Pino: GPIO 34 (Analógico)");
+    Serial.println("  Faixa: 0-4095 (ADC 12-bit)");
+    Serial.print("  Leitura teste: ");
+    Serial.println(testUV);
+  } else {
+    Serial.println("⚠ Sensor UV não respondeu");
+    estado.uvDisponivel = false;
+  }
+}
+
+/**
+ * Inicializa o sensor LDR HW-072 (Luminosidade)
+ */
+void inicializarSensorLDR() {
+  Serial.println("\n=== INICIALIZANDO SENSOR LDR ===");
+  pinMode(LDR_PIN, INPUT);
+  analogSetPinAttenuation(LDR_PIN, ADC_11db);
+  delay(100);
+  
+  int testLDR = analogRead(LDR_PIN);
+  if (testLDR >= 0) {
+    estado.ldrDisponivel = true;
+    Serial.println("✓ Sensor LDR inicializado com sucesso!");
+    Serial.println("  Pino: GPIO 35 (Analógico)");
+    Serial.println("  Faixa: 0-4095 (ADC 12-bit)");
+    Serial.print("  Leitura teste: ");
+    Serial.println(testLDR);
+  } else {
+    Serial.println("⚠ Sensor LDR não respondeu");
+    estado.ldrDisponivel = false;
+  }
 }
 
 /**
@@ -317,57 +320,70 @@ void inicializarBME280() {
     Serial.println("  Nenhum dispositivo I2C encontrado!");
   }
   
-  // Tentar endereço 0x76 primeiro (mais comum em módulos) com retry
-  bool bmeEncontrado = false;
-  for (int tentativa = 1; tentativa <= 3 && !bmeEncontrado; tentativa++) {
-    Serial.printf("Tentando BME280 em 0x76 (tentativa %d/3)...\n", tentativa);
-    if (bme280.begin(BME280_ADDRESS_1)) {
-      estado.bme280Endereco = BME280_ADDRESS_1;
-      Serial.println("✓ BME280 encontrado em 0x76!");
-      bmeEncontrado = true;
+  // Tentar endereço 0x76 primeiro (mais comum em módulos)
+  Serial.println("Tentando BME280 em 0x76...");
+  if (bme280.begin(BME280_ADDRESS_1)) {
+    estado.bme280Endereco = BME280_ADDRESS_1;
+    Serial.println("✓ BME280 encontrado em 0x76!");
+  } else {
+    // Tentar endereço 0x77
+    Serial.println("Tentando BME280 em 0x77...");
+    if (bme280.begin(BME280_ADDRESS_2)) {
+      estado.bme280Endereco = BME280_ADDRESS_2;
+      Serial.println("✓ BME280 encontrado em 0x77!");
     } else {
-      Serial.println("Tentando BME280 em 0x77...");
-      if (bme280.begin(BME280_ADDRESS_2)) {
-        estado.bme280Endereco = BME280_ADDRESS_2;
-        Serial.println("✓ BME280 encontrado em 0x77!");
-        bmeEncontrado = true;
-      } else if (tentativa < 3) {
-        Serial.println("  ⚠ Falhou, reiniciando I2C...");
-        Wire.end();
-        delay(100);
-        Wire.begin(SDA_PIN, SCL_PIN);
-        delay(200);
-      }
+      Serial.println("✗ Não foi possível encontrar o BME280!");
+      Serial.println("  Nenhum BME280 em 0x76 ou 0x77");
+      Serial.println("Verifique a conexão do sensor:");
+      Serial.println("  SDA -> GPIO 21");
+      Serial.println("  SCL -> GPIO 22");
+      Serial.println("  VCC -> 3.3V");
+      Serial.println("  GND -> GND");
+      Serial.println("⚠ Continuando sem BME280...");
+      return;
     }
   }
   
-  if (!bmeEncontrado) {
-    Serial.println("✗ Não foi possível encontrar o BME280!");
-    Serial.println("  Nenhum BME280 em 0x76 ou 0x77");
-    Serial.println("Verifique a conexão do sensor:");
-    Serial.println("  SDA -> GPIO 21");
-    Serial.println("  SCL -> GPIO 22");
-    Serial.println("  VCC -> 3.3V");
-    Serial.println("  GND -> GND");
-    Serial.println("⚠ Continuando sem BME280...");
-    return;
+  estado.bme280Disponivel = true;
+  
+  // Ler chip ID do registrador 0xD0 para identificar BME280 vs BMP280
+  Wire.beginTransmission(estado.bme280Endereco);
+  Wire.write(0xD0);
+  Wire.endTransmission();
+  Wire.requestFrom(estado.bme280Endereco, (uint8_t)1);
+  uint8_t chipID = Wire.read();
+  
+  Serial.print("  Chip ID: 0x");
+  Serial.println(chipID, HEX);
+  
+  if (chipID == 0x60) {
+    Serial.println("✓ Chip confirmado como BME280 (temp + umidade + pressão)");
+  } else if (chipID == 0x58) {
+    Serial.println("⚠ ATENÇÃO: Chip é BMP280 (NÃO é BME280!)");
+    Serial.println("  BMP280 NÃO tem sensor de umidade!");
+    Serial.println("  Leituras de umidade serão inválidas (ex: 100% fixo)");
+    Serial.println("  Pressão pode ter compensação incorreta com lib BME280");
+  } else {
+    Serial.print("⚠ Chip ID desconhecido: 0x");
+    Serial.println(chipID, HEX);
+    Serial.println("  Pode ser um clone ou sensor diferente");
   }
   
-  estado.bme280Disponivel = true;
-  Serial.println("✓ BME280 inicializado com sucesso!");
+  Serial.println("✓ Sensor inicializado!");
   
-  // Configurar o sensor em modo normal com filtro IIR para suavizar ruído
+  // Configurar o sensor para modo normal
   bme280.setSampling(Adafruit_BME280::MODE_NORMAL,
                      Adafruit_BME280::SAMPLING_X2,  // temperatura
                      Adafruit_BME280::SAMPLING_X16, // pressão
                      Adafruit_BME280::SAMPLING_X2,  // umidade
-                     Adafruit_BME280::FILTER_X4,
-                     Adafruit_BME280::STANDBY_MS_500);
+                     Adafruit_BME280::FILTER_X16,
+                     Adafruit_BME280::STANDBY_MS_0_5);
   
-  delay(100); // Aguardar primeira medição em modo normal
+  // Fazer leitura de teste
+  delay(200);
   float testTemp = bme280.readTemperature();
-  float testPress = bme280.readPressure() / 100.0F;
   float testUmid = bme280.readHumidity();
+  float testPress = bme280.readPressure() / 100.0F;
   
   Serial.print("  Teste - T: ");
   Serial.print(testTemp, 1);
@@ -375,7 +391,27 @@ void inicializarBME280() {
   Serial.print(testUmid, 1);
   Serial.print("% | P: ");
   Serial.print(testPress, 1);
-  Serial.println("hPa");
+  Serial.println(" hPa");
+  
+  // Validar leituras de teste
+  bool pressaoValida = (testPress >= 300.0 && testPress <= 1100.0);
+  bool umidadeValida = (testUmid >= 0.0 && testUmid <= 100.0 && testUmid != 100.0); // 100% fixo = suspeito
+  
+  if (!pressaoValida) {
+    Serial.println("  ✗ PRESSÃO FORA DA FAIXA VÁLIDA (300-1100 hPa)!");
+    Serial.print("    Valor lido: ");
+    Serial.print(testPress, 2);
+    Serial.println(" hPa");
+    Serial.println("    Para Brasília (~1100m) o esperado é ~890 hPa");
+    Serial.println("    Possíveis causas:");
+    Serial.println("      1. Módulo é BMP280 (não BME280) com calibração incompatível");
+    Serial.println("      2. Dados de calibração do sensor corrompidos");
+    Serial.println("      3. Sensor clone com firmware defeituoso");
+  }
+  
+  if (!umidadeValida && chipID != 0x60) {
+    Serial.println("  ✗ UMIDADE INVÁLIDA (provavelmente BMP280 sem sensor de umidade)");
+  }
 
   // Armazenar leitura inicial no estado
   estado.temperatura_bme280 = testTemp;
@@ -543,7 +579,7 @@ void criarArquivoCSV() {
   if (!SD.exists(nomeArquivo)) {
     File arquivo = SD.open(nomeArquivo, FILE_WRITE);
     if (arquivo) {
-      arquivo.println("Timestamp;Temp_BME280;Umid_BME280;Pressao;Temp_DHT22;Umid_DHT22;Indice_UV;LDR_Raw;LDR_mV;LDR_Pct");
+      arquivo.println("Timestamp;Temp_BME280;Umid_BME280;Pressao;Temp_DHT22;Umid_DHT22;Indice_UV;Luminosidade");
       arquivo.close();
       Serial.print("✓ Arquivo criado: ");
       Serial.println(nomeArquivo);
@@ -584,10 +620,11 @@ void gravarDadosSD() {
   lerSensoresDHT22(true);
   delay(50);
   lerSensorUV(true);
+  lerSensorLDR(true);
 
-  Serial.printf("[SD_CARD] Valores para gravação: BME280(T:%.2f U:%.2f P:%.2f) DHT22(T:%.2f U:%.2f) UV(%.1f)\n",
+  Serial.printf("[SD_CARD] Valores para gravação: BME280(T:%.2f U:%.2f P:%.2f) DHT22(T:%.2f U:%.2f) UV(%.1f) LDR(%.1f%%)\n",
     estado.temperatura_bme280, estado.umidade_bme280, estado.pressao,
-    estado.temperatura_dht22, estado.umidade_dht22, estado.indiceUV);
+    estado.temperatura_dht22, estado.umidade_dht22, estado.indiceUV, estado.luminosidade);
 
   // Verificar saúde do cartão antes de gravar
   if (!verificarSaudeSD()) {
@@ -624,11 +661,7 @@ void gravarDadosSD() {
     linha += ";";
     linha += String(estado.indiceUV, 1);
     linha += ";";
-    linha += String(estado.ldrRaw);
-    linha += ";";
-    linha += String(estado.ldrMv);
-    linha += ";";
-    linha += String(estado.ldrPercentual, 1);
+    linha += String(estado.luminosidade, 1);
     
     size_t bytesEscritos = arquivo.println(linha);
     arquivo.flush();
@@ -783,19 +816,7 @@ void configurarRotas() {
     lerSensorUV();
     String response = "{\"status\":\"ok\",\"sensor\":\"GUVA-S12SD\",\"nivel_uv\":" + String(estado.nivelUV) + ",\"indice_uv\":" + String(estado.indiceUV, 2) + ",\"unidade\":\"UV\"}";
     enviarJSON(response);
-  });
-
-  // Leitura de luminosidade LDR
-  server.on("/ldr", HTTP_GET, []() {
-    lerLDR(true);
-    String response = "{\"status\":\"ok\",\"sensor\":\"LDR HW-072\",\"pino\":" + String(LDR_PIN) +
-                      ",\"raw\":" + String(estado.ldrRaw) +
-                      ",\"mV\":" + String(estado.ldrMv) +
-                      ",\"luminosidade_pct\":" + String(estado.ldrPercentual, 1) +
-                      ",\"descricao\":\"" + estado.ldrDescricao + "\"}";
-    enviarJSON(response);
-  });
-
+  });  
   // PWM
   server.on("/pwm", HTTP_GET, handlePWM);
   
@@ -901,8 +922,7 @@ void handleStatus() {
   json += "\"sensores\":{";
   json += "\"bme280\":{\"temperatura\":" + String(estado.temperatura_bme280, 2) + ",\"umidade\":" + String(estado.umidade_bme280, 2) + ",\"pressao\":" + String(estado.pressao, 2) + "},";
   json += "\"dht22\":{\"temperatura\":" + String(estado.temperatura_dht22, 2) + ",\"umidade\":" + String(estado.umidade_dht22, 2) + "},";
-  json += "\"uv\":{\"nivel\":" + String(estado.nivelUV) + ",\"indice\":" + String(estado.indiceUV, 2) + "},";
-  json += "\"ldr\":{\"raw\":" + String(estado.ldrRaw) + ",\"mV\":" + String(estado.ldrMv) + ",\"luminosidade_pct\":" + String(estado.ldrPercentual, 1) + ",\"descricao\":\"" + estado.ldrDescricao + "\"}";
+  json += "\"uv\":{\"nivel\":" + String(estado.nivelUV) + ",\"indice\":" + String(estado.indiceUV, 2) + "}";
   json += "},";
   json += "\"uptime\":" + String(millis() / 1000);
   json += "}";
@@ -924,7 +944,7 @@ void handleSensores() {
   json += "{\"nome\":\"Temperatura (DHT22)\",\"valor\":" + String(estado.temperatura_dht22, 2) + ",\"unidade\":\"°C\",\"icone\":\"🌡\"},";
   json += "{\"nome\":\"Umidade (DHT22)\",\"valor\":" + String(estado.umidade_dht22, 2) + ",\"unidade\":\"%\",\"icone\":\"💧\"},";
   json += "{\"nome\":\"Índice UV\",\"valor\":" + String(estado.indiceUV, 2) + ",\"unidade\":\"UV\",\"icone\":\"☀️\"},";
-  json += "{\"nome\":\"Luminosidade (LDR)\",\"valor\":" + String(estado.ldrPercentual, 1) + ",\"unidade\":\"%\",\"icone\":\"💡\",\"descricao\":\"" + estado.ldrDescricao + "\"},";
+  json += "{\"nome\":\"Luminosidade\",\"valor\":" + String(estado.luminosidade, 1) + ",\"unidade\":\"%\",\"icone\":\"💡\"},";
   json += "{\"nome\":\"LED\",\"valor\":" + String(estado.led ? "1" : "0") + ",\"unidade\":\"bool\",\"icone\":\"💡\"},";
   json += "{\"nome\":\"Relé 1\",\"valor\":" + String(estado.rele1 ? "1" : "0") + ",\"unidade\":\"bool\",\"icone\":\"🔌\"},";
   json += "{\"nome\":\"Relé 2\",\"valor\":" + String(estado.rele2 ? "1" : "0") + ",\"unidade\":\"bool\",\"icone\":\"🔌\"}";
@@ -1040,30 +1060,13 @@ void lerSensoresBME280(bool forcado) {
     estado.ultimaTentativaBME280 = agora;
     
     Serial.println("[BME280] 🔄 Tentando reconectar...");
-    // Reiniciar I2C antes de tentar (resolve Error 263)
-    Wire.end();
-    delay(50);
-    Wire.begin(SDA_PIN, SCL_PIN);
-    delay(50);
     // Tentar ambos endereços
     if (bme280.begin(BME280_ADDRESS_1)) {
       estado.bme280Endereco = BME280_ADDRESS_1;
-      bme280.setSampling(Adafruit_BME280::MODE_NORMAL,
-                         Adafruit_BME280::SAMPLING_X2,
-                         Adafruit_BME280::SAMPLING_X16,
-                         Adafruit_BME280::SAMPLING_X2,
-                         Adafruit_BME280::FILTER_X4,
-                         Adafruit_BME280::STANDBY_MS_500);
       Serial.println("[BME280] ✓ Reconectado em 0x76!");
       estado.bme280Disponivel = true;
     } else if (bme280.begin(BME280_ADDRESS_2)) {
       estado.bme280Endereco = BME280_ADDRESS_2;
-      bme280.setSampling(Adafruit_BME280::MODE_NORMAL,
-                         Adafruit_BME280::SAMPLING_X2,
-                         Adafruit_BME280::SAMPLING_X16,
-                         Adafruit_BME280::SAMPLING_X2,
-                         Adafruit_BME280::FILTER_X4,
-                         Adafruit_BME280::STANDBY_MS_500);
       Serial.println("[BME280] ✓ Reconectado em 0x77!");
       estado.bme280Disponivel = true;
     } else {
@@ -1073,67 +1076,47 @@ void lerSensoresBME280(bool forcado) {
   }
   
   if (forcado || millis() - estado.ultimaLeituraTemp >= estado.INTERVALO_LEITURA) {
-    // Múltiplas leituras com mediana para eliminar glitches I2C
-    const int NUM_LEITURAS = 5;
-    float temps[NUM_LEITURAS], umids[NUM_LEITURAS], presss[NUM_LEITURAS];
-    int leituras_validas = 0;
+    float temp = bme280.readTemperature();
+    float umid = bme280.readHumidity();
+    float press = bme280.readPressure() / 100.0F; // Converter Pa para hPa
     
-    for (int i = 0; i < NUM_LEITURAS; i++) {
-      // Ler na ordem: T → P → U
-      float t = bme280.readTemperature();
-      float p = bme280.readPressure() / 100.0F;
-      float u = bme280.readHumidity();
-      
-      if (i < NUM_LEITURAS - 1) delay(20); // Pequeno intervalo entre leituras
-      
-      // Validar: NaN e faixa do BME280 (spec: T -40~85, U 0~100, P 300~1100)
-      if (!isnan(t) && !isnan(u) && !isnan(p) &&
-          t >= -40.0 && t <= 85.0 &&
-          u >= 0.0 && u <= 100.0 &&
-          p >= 300.0 && p <= 1100.0) {
-        temps[leituras_validas] = t;
-        umids[leituras_validas] = u;
-        presss[leituras_validas] = p;
-        leituras_validas++;
+    // Validar leituras (NaN = falha de comunicação I2C)
+    if (!isnan(temp) && !isnan(umid) && !isnan(press)) {
+      // Validar faixa de pressão (300-1100 hPa é a faixa válida do BME280)
+      if (press < 300.0 || press > 1100.0) {
+        Serial.print("[BME280] ⚠ Pressão fora da faixa válida: ");
+        Serial.print(press, 2);
+        Serial.println(" hPa (esperado 300-1100)");
+        Serial.println("[BME280] ⚠ Sensor pode ser BMP280 ou ter calibração corrompida");
+        // Não atualizar estado.pressao com valor inválido
+        // Manter temperatura se válida
+        if (temp > -40.0 && temp < 85.0) {
+          estado.temperatura_bme280 = temp;
+        }
+        estado.ultimaLeituraTemp = millis();
+      } else {
+        estado.temperatura_bme280 = temp;
+        estado.umidade_bme280 = umid;
+        estado.pressao = press;
+        estado.ultimaLeituraTemp = millis();
       }
-    }
-    
-    if (leituras_validas >= 3) {
-      // Ordenar e pegar mediana (insertion sort)
-      for (int i = 1; i < leituras_validas; i++) {
-        float kt = temps[i], ku = umids[i], kp = presss[i];
-        int j = i - 1;
-        while (j >= 0 && temps[j] > kt) { temps[j+1] = temps[j]; umids[j+1] = umids[j]; presss[j+1] = presss[j]; j--; }
-        temps[j+1] = kt; umids[j+1] = ku; presss[j+1] = kp;
+      
+      Serial.print("[BME280] T: ");
+      Serial.print(estado.temperatura_bme280, 1);
+      Serial.print(" °C | U: ");
+      Serial.print(estado.umidade_bme280, 1);
+      Serial.print(" % | P: ");
+      Serial.print(estado.pressao, 2);
+      Serial.print(" hPa");
+      if (press < 300.0 || press > 1100.0) {
+        Serial.print(" [RAW INVÁLIDO: ");
+        Serial.print(press, 2);
+        Serial.print("]");
       }
-      int mid = leituras_validas / 2;
-      estado.temperatura_bme280 = temps[mid];
-      estado.umidade_bme280 = umids[mid];
-      estado.pressao = presss[mid];
-      
-      estado.ultimaLeituraTemp = millis();
-      
-      Serial.printf("[BME280] T:%.1f°C U:%.1f%% P:%.2fhPa (%d/%d válidas)\n",
-        estado.temperatura_bme280, estado.umidade_bme280, estado.pressao,
-        leituras_validas, NUM_LEITURAS);
-    } else if (leituras_validas > 0) {
-      // Poucas leituras válidas - usar a primeira válida mas avisar
-      estado.temperatura_bme280 = temps[0];
-      estado.umidade_bme280 = umids[0];
-      estado.pressao = presss[0];
-      estado.ultimaLeituraTemp = millis();
-      Serial.printf("[BME280] ⚠ Apenas %d/%d válidas - T:%.1f U:%.1f P:%.2f\n",
-        leituras_validas, NUM_LEITURAS, temps[0], umids[0], presss[0]);
+      Serial.println();
     } else {
-      Serial.printf("[BME280] ⚠ 0/%d válidas (NaN ou fora de range) - mantendo valores anteriores\n", NUM_LEITURAS);
-      // Após 3 falhas consecutivas, forçar reconexão
-      static int falhas_consecutivas = 0;
-      falhas_consecutivas++;
-      if (falhas_consecutivas >= 3) {
-        Serial.println("[BME280] ✗ Muitas falhas - forçando reconexão");
-        estado.bme280Disponivel = false;
-        falhas_consecutivas = 0;
-      }
+      Serial.println("[BME280] ⚠ Leitura inválida (NaN) - sensor com problema de comunicação");
+      estado.bme280Disponivel = false; // Forçar reconexão na próxima tentativa
     }
   }
 }
@@ -1188,96 +1171,109 @@ void lerSensoresDHT22(bool forcado) {
  * @param forcado Se true, força leitura imediata ignorando intervalo
  */
 void lerSensorUV(bool forcado) {
+  // Se não está disponível, tentar reconectar
   if (!estado.uvDisponivel) {
-    estado.uvDisponivel = true;
+    pinMode(UV_PIN, INPUT);
+    delay(50);
+    int testUV = analogRead(UV_PIN);
+    if (testUV >= 0) {
+      Serial.println("[UV] ✓ Reconectado!");
+      estado.uvDisponivel = true;
+    } else {
+      Serial.println("[UV] ⚠ Sensor não está disponível");
+      if (!forcado) return;
+      // Quando forcado, continuar mesmo sem disponibilidade confirmada
+    }
   }
   
   if (forcado || millis() - estado.ultimaLeituraUV >= estado.INTERVALO_UV) {
-    // Pausar SPI para eliminar ruído EMI no ADC (GPIO 32 é alta impedância)
-    SPI.end();
-    pinMode(SD_CLK_PIN, OUTPUT);  digitalWrite(SD_CLK_PIN, LOW);
-    pinMode(SD_MOSI_PIN, OUTPUT); digitalWrite(SD_MOSI_PIN, LOW);
-    pinMode(SD_MISO_PIN, OUTPUT); digitalWrite(SD_MISO_PIN, LOW);
-    pinMode(SD_CS_PIN, OUTPUT);   digitalWrite(SD_CS_PIN, LOW);
-    delay(10);
-
-    // Descartar primeiras leituras (estabilizar ADC)
-    for (int d = 0; d < 20; d++) { analogRead(UV_PIN); delay(2); }
-
-    const int NUM_AMOSTRAS = 64;
-    long soma_raw = 0;
-    long soma_calMv = 0;
-    int minRaw = 4095, maxRaw = 0;
-    for (int i = 0; i < NUM_AMOSTRAS; i++) {
-      int raw = analogRead(UV_PIN);
-      int calMv = analogReadMilliVolts(UV_PIN);
-      soma_raw += raw;
-      soma_calMv += calMv;
-      if (raw < minRaw) minRaw = raw;
-      if (raw > maxRaw) maxRaw = raw;
-      delay(2);
-    }
-    float media_raw = (float)soma_raw / NUM_AMOSTRAS;
-    float calMv_media = (float)soma_calMv / NUM_AMOSTRAS;
-    // Calcular mV direto do raw (sem offset eFuse)
-    float tensao_mV = media_raw * 3300.0f / 4095.0f;
-    estado.nivelUV = (int)media_raw;
-
-    // Pino flutuante: ADC oscila em quase toda a faixa
-    int spread = maxRaw - minRaw;
-    if (spread > 3500) {
-      Serial.printf("[UV] ⚠ Pino flutuante (spread:%d)\n", spread);
-      tensao_mV = 0.0;
-      media_raw = 0.0;
-      estado.nivelUV = 0;
-    }
-
-    // Diagnóstico: verificar GPIO 34 como referência (sem sensor)
-    int ref34 = analogRead(34);
-    int ref34mv = analogReadMilliVolts(34);
-
-    // Reativar SPI e SD Card
-    SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
-    pinMode(SD_CS_PIN, OUTPUT);
-    digitalWrite(SD_CS_PIN, HIGH);
-    delay(5);
-    if (estado.cartaoSDconectado) {
-      SD.end();
-      delay(5);
-      if (!SD.begin(SD_CS_PIN, SPI, 2000000)) {
-        Serial.println("[UV] ⚠ SD Card falhou após leitura UV");
-        estado.cartaoSDconectado = false;
-        estado.nomeArquivoCSV = "";
-      }
-    }
-
-    // Tabela oficial GUVA-S12SD (mV -> índice UV)
-    const int tabela_mV[] =  {  50, 227, 318, 408, 503, 606, 696, 795, 881, 976, 1079, 1170 };
-    const int tabela_UV[]  =  {   0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,   11 };
-    const int TAB_SIZE = 12;
+    // Reconfigurar pino ADC (WiFi pode interferir com ADC)
+    pinMode(UV_PIN, INPUT);
+    analogSetPinAttenuation(UV_PIN, ADC_11db);
+    delay(2);
     
-    float indice = 0.0;
-    if (tensao_mV < tabela_mV[0]) {
-      indice = 0.0;
-    } else if (tensao_mV >= tabela_mV[TAB_SIZE - 1]) {
-      indice = 11.0;
-    } else {
-      for (int i = 0; i < TAB_SIZE - 1; i++) {
-        if (tensao_mV >= tabela_mV[i] && tensao_mV < tabela_mV[i + 1]) {
-          float frac = (float)(tensao_mV - tabela_mV[i]) / (tabela_mV[i + 1] - tabela_mV[i]);
-          indice = tabela_UV[i] + frac * (tabela_UV[i + 1] - tabela_UV[i]);
-          break;
-        }
-      }
+    // Descartar primeira leitura (pode estar corrompida pelo WiFi)
+    analogRead(UV_PIN);
+    delayMicroseconds(200);
+    
+    // Fazer 10 leituras e calcular média para estabilidade
+    long soma = 0;
+    for (int i = 0; i < 10; i++) {
+      soma += analogRead(UV_PIN);
+      delayMicroseconds(100);
     }
-    estado.indiceUV = indice;
+    estado.nivelUV = soma / 10;
+    
+    // Converter para índice UV (fórmula original que funcionava)
+    // GUVA-S12SD: ~1V = 1 mW/cm² (irradiância UV)
+    // Tensão = (nivelUV / 1023) * 3.3V
+    float tensao = (estado.nivelUV / 1023.0) * 3.3;
+    float irradiancia = (tensao / 0.1) * 0.001; // em W/cm²
+    estado.indiceUV = irradiancia * 40; // Conversão para índice UV (0-15)
+    
+    // Limitar a índice UV a máximo de 15
     if (estado.indiceUV > 15) estado.indiceUV = 15;
-
-    Serial.printf("[UV] raw=%.0f rawMV=%.1f calMV=%.1f UV=%.2f (min:%d max:%d spread:%d)\n",
-                  media_raw, tensao_mV, calMv_media, estado.indiceUV, minRaw, maxRaw, spread);
-    Serial.printf("[UV] REF GPIO34: raw=%d calMV=%d (se igual a GPIO32 = offset eFuse)\n", ref34, ref34mv);
-
+    
+    Serial.print("[UV] ☀️ ADC: ");
+    Serial.print(estado.nivelUV);
+    Serial.print(" | Tensão: ");
+    Serial.print(tensao, 2);
+    Serial.print("V | Índice UV: ");
+    Serial.println(estado.indiceUV, 2);
+    
     estado.ultimaLeituraUV = millis();
+  }
+}
+
+/**
+ * Ler sensor LDR HW-072 (Luminosidade)
+ * LDR: resistência diminui com mais luz → valor ADC diminui com mais luz
+ * Invertemos para que luminosidade alta = valor alto
+ */
+void lerSensorLDR(bool forcado) {
+  if (!estado.ldrDisponivel) {
+    delay(50);
+    int testLDR = analogRead(LDR_PIN);
+    if (testLDR >= 0) {
+      Serial.println("[LDR] ✓ Reconectado!");
+      estado.ldrDisponivel = true;
+    } else {
+      Serial.println("[LDR] ⚠ Sensor não está disponível");
+      if (!forcado) return;
+    }
+  }
+  
+  if (forcado || millis() - estado.ultimaLeituraLDR >= estado.INTERVALO_LDR) {
+    pinMode(LDR_PIN, INPUT);
+    analogSetPinAttenuation(LDR_PIN, ADC_11db);
+    delay(2);
+    
+    // Descartar primeira leitura
+    analogRead(LDR_PIN);
+    delayMicroseconds(200);
+    
+    // Fazer 10 leituras e calcular média
+    long soma = 0;
+    for (int i = 0; i < 10; i++) {
+      soma += analogRead(LDR_PIN);
+      delayMicroseconds(100);
+    }
+    estado.nivelLDR = soma / 10;
+    
+    // Converter para percentual (0-100%)
+    // LDR: valor ADC alto = escuro, valor ADC baixo = claro
+    // Invertemos: luminosidade% = 100 - (adc/4095*100)
+    estado.luminosidade = 100.0 - ((estado.nivelLDR / 4095.0) * 100.0);
+    if (estado.luminosidade < 0) estado.luminosidade = 0;
+    if (estado.luminosidade > 100) estado.luminosidade = 100;
+    
+    Serial.print("[LDR] 💡 ADC: ");
+    Serial.print(estado.nivelLDR);
+    Serial.print(" | Luminosidade: ");
+    Serial.print(estado.luminosidade, 1);
+    Serial.println("%");
+    
+    estado.ultimaLeituraLDR = millis();
   }
 }
 
@@ -1287,7 +1283,7 @@ void lerSensorUV(bool forcado) {
 void verificarConexaoWiFi() {
   static unsigned long ultimaVerificacao = 0;
   static int tentativasReconexao = 0;
-  const unsigned long INTERVALO_VERIFICACAO = 5000; // 30 segundos (era 5s - muito frequente interfere ADC)
+  const unsigned long INTERVALO_VERIFICACAO = 30000; // 30 segundos (era 5s - muito frequente interfere ADC)
   const int MAX_TENTATIVAS = 5;
   
   if (millis() - ultimaVerificacao >= INTERVALO_VERIFICACAO) {
@@ -1300,7 +1296,8 @@ void verificarConexaoWiFi() {
         WiFi.reconnect();
       } else if (tentativasReconexao == MAX_TENTATIVAS) {
         tentativasReconexao++;
-        Serial.println("\n✗ WiFi: máximo de tentativas. Parando reconexão.");
+        Serial.println("\n✗ WiFi: máximo de tentativas atingido. Parando reconexão para não interferir com sensores.");
+        Serial.println("  Reinicie o ESP32 para tentar novamente.");
       }
     } else {
       tentativasReconexao = 0;
@@ -1393,33 +1390,44 @@ void processarComandoBLE(String comando) {
     resposta = "Rele 2 desligado";
   }
   else if (comando == "GET_STATUS" || comando == "STATUS") {
-    // Usar valores em cache - leitura forçada bloqueia demais e causa timeout BLE
-    // Os sensores são lidos periodicamente no loop() principal
-    resposta = "L:" + String(estado.led) + 
+    // Forçar leitura imediata de todos os sensores
+    lerSensoresBME280(true);
+    delay(100); // Delay para DHT22 processar
+    lerSensoresDHT22(true);
+    lerSensorUV(true);
+    lerSensorLDR(true);
+    resposta = "LED:" + String(estado.led) + 
                ",R1:" + String(estado.rele1) + 
                ",R2:" + String(estado.rele2) +
-               ",T:" + String(estado.temperatura_bme280, 1) +
-               ",U:" + String(estado.umidade_bme280, 1) +
+               ",T_BME:" + String(estado.temperatura_bme280, 1) +
+               ",U_BME:" + String(estado.umidade_bme280, 1) +
                ",P:" + String(estado.pressao, 1) +
-               ",T2:" + String(estado.temperatura_dht22, 1) +
-               ",U2:" + String(estado.umidade_dht22, 1) +
-               ",UV:" + String(estado.indiceUV, 1);
+               ",T_DHT:" + String(estado.temperatura_dht22, 1) +
+               ",U_DHT:" + String(estado.umidade_dht22, 1) +
+               ",UV:" + String(estado.indiceUV, 1) +
+               ",LDR:" + String(estado.luminosidade, 1);
   }
   else if (comando == "GET_SENSORS" || comando == "SENSORES") {
-    // Usar valores em cache - leitura forçada com takeForcedMeasurement() bloqueia
-    // ~500ms (5x mediana) e causa timeout BLE
-    // Os sensores são lidos periodicamente no loop() principal
-    resposta = "T:" + String(estado.temperatura_bme280, 1) + 
-               ",U:" + String(estado.umidade_bme280, 1) +
-               ",P:" + String(estado.pressao, 1) +
-               ",T2:" + String(estado.temperatura_dht22, 1) +
-               ",U2:" + String(estado.umidade_dht22, 1) +
-               ",UV:" + String(estado.indiceUV, 1);
+    // Forçar leitura imediata de todos os sensores
+    Serial.println("[BLE] GET_SENSORS - Forçando leitura de todos os sensores...");
+    lerSensoresBME280(true);
+    delay(100); // Delay para DHT22 processar
+    lerSensoresDHT22(true);
+    lerSensorUV(true);
+    lerSensorLDR(true);
+    resposta = "TEMP:" + String(estado.temperatura_bme280, 1) + 
+               ",UMID:" + String(estado.umidade_bme280, 1) +
+               ",PRESS:" + String(estado.pressao, 1) +
+               ",TEMP2:" + String(estado.temperatura_dht22, 1) +
+               ",UMID2:" + String(estado.umidade_dht22, 1) +
+               ",UV:" + String(estado.indiceUV, 1) +
+               ",LUX:" + String(estado.luminosidade, 1);
   }
   else if (comando == "DIAGNOSTICO") {
     resposta = "BME280:" + String(estado.bme280Disponivel ? "OK" : "ERRO") +
                ",DHT22:" + String(estado.dht22Disponivel ? "OK" : "ERRO") +
                ",UV:" + String(estado.uvDisponivel ? "OK" : "ERRO") +
+               ",LDR:" + String(estado.ldrDisponivel ? "OK" : "ERRO") +
                ",SD:" + String(estado.cartaoSDconectado ? "OK" : "ERRO") +
                ",LED:" + String(estado.led ? "ON" : "OFF") +
                ",R1:" + String(estado.rele1 ? "ON" : "OFF") +
@@ -1497,26 +1505,9 @@ void processarComandoBLE(String comando) {
  */
 void enviarRespostaBLE(String mensagem) {
   if (bleDeviceConnected) {
-    // BLE MTU padrão ~20 bytes de payload. Enviar em chunks para não truncar.
-    const int CHUNK_SIZE = 20;
-    int len = mensagem.length();
-    
-    if (len <= CHUNK_SIZE) {
-      pTxCharacteristic->setValue(mensagem.c_str());
-      pTxCharacteristic->notify();
-    } else {
-      // Enviar em partes com delimitador de continuação
-      for (int offset = 0; offset < len; offset += CHUNK_SIZE) {
-        String chunk = mensagem.substring(offset, min(offset + CHUNK_SIZE, len));
-        pTxCharacteristic->setValue(chunk.c_str());
-        pTxCharacteristic->notify();
-        delay(30); // Dar tempo ao stack BLE entre notificações
-      }
-    }
-    
-    Serial.print("[BLE] Enviado (");
-    Serial.print(len);
-    Serial.print(" bytes): ");
+    pTxCharacteristic->setValue(mensagem.c_str());
+    pTxCharacteristic->notify();
+    Serial.print("[BLE] Enviado: ");
     Serial.println(mensagem);
   }
 }
@@ -1550,6 +1541,230 @@ void piscarLED() {
 }
 
 // ==================== SETUP ====================
+// ==================== MQTT ====================
+
+/**
+ * Callback quando mensagem MQTT é recebida (comandos do app)
+ */
+void callbackMQTT(char* topic, byte* payload, unsigned int length) {
+  String mensagem = "";
+  for (unsigned int i = 0; i < length; i++) {
+    mensagem += (char)payload[i];
+  }
+  
+  Serial.print("[MQTT] Recebido em ");
+  Serial.print(topic);
+  Serial.print(": ");
+  Serial.println(mensagem);
+  
+  // Processar comandos recebidos via MQTT
+  if (String(topic) == String(MQTT_TOPIC_COMANDOS)) {
+    StaticJsonDocument<256> doc;
+    DeserializationError error = deserializeJson(doc, mensagem);
+    if (error) {
+      Serial.println("[MQTT] Erro ao parsear comando JSON");
+      return;
+    }
+    
+    String comando = doc["comando"] | "";
+    String resposta = "";
+    
+    if (comando == "led_on") {
+      ligarLED();
+      resposta = "{\"status\":\"ok\",\"comando\":\"led_on\",\"estado\":true}";
+    } else if (comando == "led_off") {
+      desligarLED();
+      resposta = "{\"status\":\"ok\",\"comando\":\"led_off\",\"estado\":false}";
+    } else if (comando == "led_toggle") {
+      estado.led = !estado.led;
+      digitalWrite(LED_PIN, estado.led ? HIGH : LOW);
+      resposta = "{\"status\":\"ok\",\"comando\":\"led_toggle\",\"estado\":" + String(estado.led ? "true" : "false") + "}";
+    } else if (comando == "rele1_on") {
+      ligarRele(1);
+      resposta = "{\"status\":\"ok\",\"comando\":\"rele1_on\",\"estado\":true}";
+    } else if (comando == "rele1_off") {
+      desligarRele(1);
+      resposta = "{\"status\":\"ok\",\"comando\":\"rele1_off\",\"estado\":false}";
+    } else if (comando == "rele2_on") {
+      ligarRele(2);
+      resposta = "{\"status\":\"ok\",\"comando\":\"rele2_on\",\"estado\":true}";
+    } else if (comando == "rele2_off") {
+      desligarRele(2);
+      resposta = "{\"status\":\"ok\",\"comando\":\"rele2_off\",\"estado\":false}";
+    } else if (comando == "sensores") {
+      // Forçar publicação imediata dos sensores
+      publicarSensoresMQTT();
+      return;
+    } else if (comando == "status") {
+      publicarStatusMQTT();
+      return;
+    } else {
+      resposta = "{\"status\":\"erro\",\"mensagem\":\"Comando desconhecido: " + comando + "\"}";
+    }
+    
+    if (resposta.length() > 0) {
+      mqttClient.publish(MQTT_TOPIC_RESPOSTA, resposta.c_str());
+    }
+  }
+}
+
+/**
+ * Inicializa MQTT com HiveMQ Cloud (TLS)
+ */
+void inicializarMQTT() {
+  Serial.println("\n=== INICIALIZANDO MQTT (HiveMQ Cloud) ===");
+  
+  // Sem verificação de certificado (aceita qualquer cert do servidor)
+  espClient.setInsecure();
+  
+  mqttClient.setServer(mqtt_server, mqtt_port);
+  mqttClient.setCallback(callbackMQTT);
+  mqttClient.setBufferSize(1024); // Buffer maior para JSON dos sensores
+  
+  Serial.print("Broker: ");
+  Serial.println(mqtt_server);
+  Serial.print("Porta: ");
+  Serial.println(mqtt_port);
+  Serial.println("✓ MQTT configurado");
+}
+
+/**
+ * Conecta ao broker MQTT HiveMQ Cloud
+ */
+void conectarMQTT() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  
+  unsigned long agora = millis();
+  if (agora - ultimaTentativaMQTT < INTERVALO_RETRY_MQTT) return;
+  ultimaTentativaMQTT = agora;
+  
+  Serial.print("[MQTT] Conectando a ");
+  Serial.print(mqtt_server);
+  Serial.print("...");
+  
+  if (mqttClient.connect(mqtt_client_id, mqtt_user, mqtt_password)) {
+    mqttConectado = true;
+    Serial.println(" ✓ Conectado!");
+    
+    // Subscrever tópico de comandos
+    mqttClient.subscribe(MQTT_TOPIC_COMANDOS);
+    Serial.print("[MQTT] Subscrito em: ");
+    Serial.println(MQTT_TOPIC_COMANDOS);
+    
+    // Publicar status online
+    String onlineMsg = "{\"status\":\"online\",\"ip\":\"" + WiFi.localIP().toString() + "\",\"dispositivo\":\"NecroSENSE ESP32\"}";
+    mqttClient.publish(MQTT_TOPIC_STATUS, onlineMsg.c_str(), true); // retain=true
+    
+    // Publicar sensores imediatamente
+    publicarSensoresMQTT();
+  } else {
+    mqttConectado = false;
+    Serial.print(" ✗ Falha (rc=");
+    Serial.print(mqttClient.state());
+    Serial.println(")");
+    Serial.println("  Verifique: servidor, usuário e senha do HiveMQ Cloud");
+  }
+}
+
+/**
+ * Publica dados dos sensores via MQTT
+ */
+void publicarSensoresMQTT() {
+  if (!mqttClient.connected()) return;
+  
+  StaticJsonDocument<768> doc;
+  
+  // BME280
+  JsonObject bme = doc.createNestedObject("bme280");
+  bme["temperatura"] = round(estado.temperatura_bme280 * 100) / 100.0;
+  bme["umidade"] = round(estado.umidade_bme280 * 100) / 100.0;
+  bme["pressao"] = round(estado.pressao * 100) / 100.0;
+  bme["disponivel"] = estado.bme280Disponivel;
+  
+  // DHT22
+  JsonObject dht = doc.createNestedObject("dht22");
+  dht["temperatura"] = round(estado.temperatura_dht22 * 100) / 100.0;
+  dht["umidade"] = round(estado.umidade_dht22 * 100) / 100.0;
+  dht["disponivel"] = estado.dht22Disponivel;
+  
+  // UV
+  JsonObject uv = doc.createNestedObject("uv");
+  uv["nivel"] = estado.nivelUV;
+  uv["indice"] = round(estado.indiceUV * 100) / 100.0;
+  uv["disponivel"] = estado.uvDisponivel;
+  
+  // LDR - Luminosidade
+  JsonObject ldr = doc.createNestedObject("luminosidade");
+  ldr["nivel"] = estado.nivelLDR;
+  ldr["percentual"] = round(estado.luminosidade * 100) / 100.0;
+  ldr["disponivel"] = estado.ldrDisponivel;
+  
+  // Estado dos atuadores
+  JsonObject atuadores = doc.createNestedObject("atuadores");
+  atuadores["led"] = estado.led;
+  atuadores["rele1"] = estado.rele1;
+  atuadores["rele2"] = estado.rele2;
+  
+  doc["uptime"] = millis() / 1000;
+  doc["sd_card"] = estado.cartaoSDconectado;
+  
+  char buffer[768];
+  serializeJson(doc, buffer);
+  
+  bool ok = mqttClient.publish(MQTT_TOPIC_SENSORES, buffer);
+  if (ok) {
+    Serial.println("[MQTT] ✓ Sensores publicados");
+  } else {
+    Serial.println("[MQTT] ✗ Falha ao publicar sensores");
+  }
+}
+
+/**
+ * Publica status do dispositivo via MQTT
+ */
+void publicarStatusMQTT() {
+  if (!mqttClient.connected()) return;
+  
+  String json = "{";
+  json += "\"status\":\"online\",";
+  json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+  json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
+  json += "\"uptime\":" + String(millis() / 1000) + ",";
+  json += "\"sd_card\":\"" + String(estado.cartaoSDconectado ? "conectado" : "desconectado") + "\",";
+  json += "\"sensores_ativos\":{";
+  json += "\"bme280\":" + String(estado.bme280Disponivel ? "true" : "false") + ",";
+  json += "\"dht22\":" + String(estado.dht22Disponivel ? "true" : "false") + ",";
+  json += "\"uv\":" + String(estado.uvDisponivel ? "true" : "false") + ",";
+  json += "\"ldr\":" + String(estado.ldrDisponivel ? "true" : "false");
+  json += "}}";
+  
+  mqttClient.publish(MQTT_TOPIC_STATUS, json.c_str(), true);
+  Serial.println("[MQTT] ✓ Status publicado");
+}
+
+/**
+ * Gerencia conexão MQTT no loop
+ */
+void gerenciarMQTT() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  
+  if (!mqttClient.connected()) {
+    mqttConectado = false;
+    conectarMQTT();
+    return;
+  }
+  
+  mqttClient.loop();
+  
+  // Publicar sensores periodicamente
+  unsigned long agora = millis();
+  if (agora - ultimaPublicacaoMQTT >= MQTT_PUBLISH_INTERVAL) {
+    ultimaPublicacaoMQTT = agora;
+    publicarSensoresMQTT();
+  }
+}
+
+// ==================== SETUP ====================
 void setup() {
   Serial.begin(115200);
   delay(100);
@@ -1578,13 +1793,16 @@ void setup() {
   inicializarBME280();
   inicializarDHT22();
   inicializarSensorUV();
-  inicializarLDR();
+  inicializarSensorLDR();
   
   // Inicializar SD Card
   inicializarCartaoSD();
   
   // Conectar WiFi
   inicializarWiFi();
+  
+  // Inicializar MQTT (HiveMQ Cloud)
+  inicializarMQTT();
   
   // Configurar rotas
   configurarRotas();
@@ -1641,6 +1859,9 @@ void loop() {
   // Processar requisições HTTP
   server.handleClient();
   
+  // Gerenciar MQTT (conectar/reconectar/publicar)
+  gerenciarMQTT();
+  
   // Atualizar leituras periódicas
   static unsigned long ultimaLeitura = 0;
   static int tentativasDHT22 = 0;
@@ -1649,7 +1870,7 @@ void loop() {
     ultimaLeitura = millis();
     lerSensoresBME280();
     lerSensorUV();
-    lerLDR();
+    lerSensorLDR();
     
     // DHT22: tentar ler a cada 1 segundo até conseguir, depois a cada 30 segundos
     if (estado.temperatura_dht22 == 0.0 || estado.umidade_dht22 == 0.0) {
