@@ -453,78 +453,40 @@ bool verificarSaudeSD() {
  */
 void inicializarCartaoSD() {
   Serial.println("\n=== INICIALIZANDO CARTÃO SD ===");
-  
-  // IMPORTANTE: Fechar SD antes de reinicializar (evita estado inconsistente)
+
+  // Limpar estado anterior
   SD.end();
   SPI.end();
-  delay(100);
-  
-  // Configurar pinos SPI
-  Serial.println("Configurando SPI...");
-  SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
-  delay(200);
-  
-  // Configurar CS como output
+  delay(300);
+
+  // CS HIGH antes de iniciar
   pinMode(SD_CS_PIN, OUTPUT);
   digitalWrite(SD_CS_PIN, HIGH);
-  delay(100);
-  
-  // Tentar inicializar SD com múltiplas tentativas e velocidades
-  bool sdIniciado = false;
-  const int MAX_TENTATIVAS_SD = 3;
-  const unsigned long velocidades[] = {2000000, 1000000, 400000}; // 2MHz, 1MHz, 400kHz
-  const char* velNomes[] = {"2MHz", "1MHz", "400kHz"};
-  
-  for (int vel = 0; vel < 3 && !sdIniciado; vel++) {
-    for (int tentativa = 1; tentativa <= MAX_TENTATIVAS_SD && !sdIniciado; tentativa++) {
-      Serial.printf("Tentativa %d/%d em %s...\n", tentativa, MAX_TENTATIVAS_SD, velNomes[vel]);
-      
-      // Reset do pino CS entre tentativas
-      digitalWrite(SD_CS_PIN, HIGH);
-      delay(50);
-      
-      if (SD.begin(SD_CS_PIN, SPI, velocidades[vel])) {
-        // Verificar se o cartão realmente responde
-        uint8_t cardType = SD.cardType();
-        if (cardType != CARD_NONE) {
-          sdIniciado = true;
-          Serial.printf("✓ SD Card inicializado em %s (tentativa %d)\n", velNomes[vel], tentativa);
-        } else {
-          Serial.println("  ⚠ SD.begin OK mas cartão não detectado");
-          SD.end();
-          delay(200);
-        }
-      } else {
-        Serial.printf("  ✗ Falha na tentativa %d em %s\n", tentativa, velNomes[vel]);
-        SD.end();
-        delay(300);
-      }
-    }
-  }
-  
-  if (!sdIniciado) {
-    Serial.println("✗ Falha ao inicializar cartão SD após todas as tentativas!");
-    Serial.println("Possíveis causas:");
-    Serial.println("  1. Cartão não formatado em FAT32");
-    Serial.println("  2. Cartão não inserido ou mal encaixado");
-    Serial.println("  3. Conexões incorretas:");
-    Serial.println("     CS   -> GPIO 5");
-    Serial.println("     CLK  -> GPIO 18 (SCK)");
-    Serial.println("     MOSI -> GPIO 23 (DI/DIN)");
-    Serial.println("     MISO -> GPIO 19 (DO/DOUT)");
-    Serial.println("     VCC  -> 3.3V (NÃO 5V!)");
-    Serial.println("     GND  -> GND");
-    Serial.println("  4. Cartão SD danificado ou incompatível");
-    Serial.println("  5. Conflito SPI com outro dispositivo");
-    Serial.println("  6. Fonte de alimentação insuficiente");
+  delay(50);
+
+  // Uma única tentativa — loop() retenta a cada 60s (evita esgotar slots VFS)
+  if (!SD.begin(SD_CS_PIN)) {
+    Serial.println("✗ Falha ao inicializar cartão SD!");
+    Serial.println("Verifique:");
+    Serial.println("  1. Cartão inserido e formatado em FAT32");
+    Serial.println("  2. Conexoes: CS=GPIO5 | CLK=GPIO18 | MOSI=GPIO23 | MISO=GPIO19");
+    Serial.println("  3. VCC = 3.3V (modulo nativo 3.3V, sem AMS1117)");
+    Serial.println("  4. Capacitor 10uF~47uF entre VCC e GND do modulo");
     estado.cartaoSDconectado = false;
     return;
   }
-  
+
+  uint8_t cardType = SD.cardType();
+  if (cardType == CARD_NONE) {
+    Serial.println("⚠ SD.begin OK mas nenhum cartão detectado");
+    SD.end();
+    estado.cartaoSDconectado = false;
+    return;
+  }
+
   estado.cartaoSDconectado = true;
   Serial.println("✓ Cartão SD inicializado com sucesso!");
-  
-  uint8_t cardType = SD.cardType();
+
   Serial.print("Tipo do cartão: ");
   if (cardType == CARD_MMC) {
     Serial.println("MMC");
