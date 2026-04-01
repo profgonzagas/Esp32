@@ -6,7 +6,6 @@
     <title>NecroSENSE - Dashboard</title>
     <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
         :root {
             --bg-primary: #0f0f23;
@@ -463,6 +462,7 @@ function createChart(canvasId, label, color, yMin, yMax) {
     return new Chart(ctx, {
         type: 'line',
         data: {
+            labels: [],
             datasets: [{
                 label: label,
                 data: [],
@@ -470,7 +470,7 @@ function createChart(canvasId, label, color, yMin, yMax) {
                 backgroundColor: color + '22',
                 fill: true,
                 tension: 0.3,
-                pointRadius: 0,
+                pointRadius: 2,
                 pointHitRadius: 10,
                 borderWidth: 2
             }]
@@ -481,14 +481,12 @@ function createChart(canvasId, label, color, yMin, yMax) {
             animation: { duration: 300 },
             scales: {
                 x: {
-                    type: 'time',
-                    time: { displayFormats: { minute: 'HH:mm', hour: 'HH:mm' } },
-                    ticks: { color: '#666', maxTicksLimit: 8 },
+                    ticks: { color: '#888', maxTicksLimit: 8, maxRotation: 0 },
                     grid: { color: 'rgba(255,255,255,0.05)' }
                 },
                 y: {
-                    min: yMin,
-                    max: yMax,
+                    ...(yMin !== null && { min: yMin }),
+                    ...(yMax !== null && { max: yMax }),
                     ticks: { color: '#888' },
                     grid: { color: 'rgba(255,255,255,0.05)' }
                 }
@@ -497,8 +495,7 @@ function createChart(canvasId, label, color, yMin, yMax) {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        title: (items) => new Date(items[0].parsed.x).toLocaleString('pt-BR'),
-                        label: (item) => label + ': ' + item.parsed.y.toFixed(1)
+                        label: (item) => label + ': ' + Number(item.raw).toFixed(1)
                     }
                 }
             }
@@ -523,15 +520,18 @@ function initCharts() {
 }
 
 function updateCharts() {
-    const mapData = (key) => dataHistory
-        .filter(d => d[key] !== null)
-        .map(d => ({ x: new Date(d.timestamp), y: d[key] }));
+    const labels = dataHistory.map(d => new Date(d.timestamp).toLocaleTimeString('pt-BR'));
     
-    charts.temp.data.datasets[0].data = mapData('temp_bme');
-    charts.umid.data.datasets[0].data = mapData('umid_bme');
-    charts.press.data.datasets[0].data = mapData('pressao');
-    charts.uv.data.datasets[0].data = mapData('indice_uv');
-    charts.ldr.data.datasets[0].data = mapData('ldr_pct');
+    const setChart = (chart, key) => {
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = dataHistory.map(d => d[key]);
+    };
+
+    setChart(charts.temp,  'temp_bme');
+    setChart(charts.umid,  'umid_bme');
+    setChart(charts.press, 'pressao');
+    setChart(charts.uv,    'indice_uv');
+    setChart(charts.ldr,   'ldr_pct');
     
     Object.values(charts).forEach(c => c.update('none'));
 }
