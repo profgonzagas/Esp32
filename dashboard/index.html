@@ -242,24 +242,40 @@
 
 <div class="charts-grid">
     <div class="chart-card">
-        <h3>&#127777; Temperatura</h3>
+        <h3>&#127777; Temp BME280 (°C)</h3>
         <canvas id="chartTemp"></canvas>
     </div>
     <div class="chart-card">
-        <h3>&#128167; Umidade</h3>
+        <h3>&#128167; Umidade BME280 (%)</h3>
         <canvas id="chartUmid"></canvas>
     </div>
     <div class="chart-card">
-        <h3>&#9203; Pressao Atmosferica</h3>
+        <h3>&#9203; Pressao (hPa)</h3>
         <canvas id="chartPress"></canvas>
+    </div>
+    <div class="chart-card">
+        <h3>&#127777; Temp DHT22 (°C)</h3>
+        <canvas id="chartTempDHT"></canvas>
+    </div>
+    <div class="chart-card">
+        <h3>&#128167; Umidade DHT22 (%)</h3>
+        <canvas id="chartUmidDHT"></canvas>
     </div>
     <div class="chart-card">
         <h3>&#9728; Indice UV</h3>
         <canvas id="chartUV"></canvas>
     </div>
     <div class="chart-card">
-        <h3>&#128161; Luminosidade</h3>
+        <h3>&#128161; Luminosidade (%)</h3>
         <canvas id="chartLDR"></canvas>
+    </div>
+    <div class="chart-card">
+        <h3>&#128308; LDR Nivel (Raw)</h3>
+        <canvas id="chartLDRNivel"></canvas>
+    </div>
+    <div class="chart-card">
+        <h3>&#9201; Uptime (s)</h3>
+        <canvas id="chartUptime"></canvas>
     </div>
 </div>
 
@@ -504,11 +520,15 @@ function createChart(canvasId, label, color, yMin, yMax) {
 }
 
 function initCharts() {
-    charts.temp  = createChart('chartTemp', 'Temperatura (°C)', '#ff5722', null, null);
-    charts.umid  = createChart('chartUmid', 'Umidade (%)', '#2196f3', 0, 100);
-    charts.press = createChart('chartPress', 'Pressao (hPa)', '#4caf50', null, null);
-    charts.uv    = createChart('chartUV', 'Indice UV', '#9c27b0', 0, 15);
-    charts.ldr   = createChart('chartLDR', 'Luminosidade (%)', '#ffc107', 0, 100);
+    charts.temp     = createChart('chartTemp',     'Temp BME280 (°C)',   '#ff5722', null, null);
+    charts.umid     = createChart('chartUmid',     'Umidade BME280 (%)', '#2196f3', 0, 100);
+    charts.press    = createChart('chartPress',    'Pressao (hPa)',      '#4caf50', null, null);
+    charts.tempDHT  = createChart('chartTempDHT',  'Temp DHT22 (°C)',    '#ff9800', null, null);
+    charts.umidDHT  = createChart('chartUmidDHT',  'Umidade DHT22 (%)', '#03a9f4', 0, 100);
+    charts.uv       = createChart('chartUV',       'Indice UV',          '#9c27b0', 0, 15);
+    charts.ldr      = createChart('chartLDR',      'Luminosidade (%)',   '#ffc107', 0, 100);
+    charts.ldrNivel = createChart('chartLDRNivel', 'LDR Nivel (Raw)',    '#e91e63', null, null);
+    charts.uptime   = createChart('chartUptime',   'Uptime (s)',         '#607d8b', null, null);
     
     // Carregar dados persistidos
     if (dataHistory.length > 0) {
@@ -527,11 +547,15 @@ function updateCharts() {
         chart.data.datasets[0].data = dataHistory.map(d => d[key]);
     };
 
-    setChart(charts.temp,  'temp_bme');
-    setChart(charts.umid,  'umid_bme');
-    setChart(charts.press, 'pressao');
-    setChart(charts.uv,    'indice_uv');
-    setChart(charts.ldr,   'ldr_pct');
+    setChart(charts.temp,     'temp_bme');
+    setChart(charts.umid,     'umid_bme');
+    setChart(charts.press,    'pressao');
+    setChart(charts.tempDHT,  'temp_dht');
+    setChart(charts.umidDHT,  'umid_dht');
+    setChart(charts.uv,       'indice_uv');
+    setChart(charts.ldr,      'ldr_pct');
+    setChart(charts.ldrNivel, 'ldr_nivel');
+    setChart(charts.uptime,   'uptime');
     
     Object.values(charts).forEach(c => c.update('none'));
 }
