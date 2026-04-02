@@ -68,7 +68,7 @@ const unsigned long MQTT_PUBLISH_INTERVAL = 30000; // Publicar a cada 30 segundo
 #define UV_PIN 34           // GUVA-S12SD em GPIO 34 (Analógico)
 #define LDR_PIN 35          // LDR HW-072 em GPIO 35 (Analógico)
 // Pinos do SD Card (SPI)
-#define SD_CS_PIN 5         // Chip Select em GPIO 5 AMARELO
+#define SD_CS_PIN 15         // Chip Select em GPIO 15 era o 5 AMARELO
 #define SD_CLK_PIN 18       // Clock em GPIO 18 (SCK) AZUL
 #define SD_MOSI_PIN 23      // MOSI/DI/DIN em GPIO 23 BRANCO
 #define SD_MISO_PIN 19      // MISO/DO/DOUT em GPIO 19 VERDE
@@ -457,19 +457,19 @@ void inicializarCartaoSD() {
   // Limpar estado anterior
   SD.end();
   SPI.end();
-  delay(300);
+  delay(500);
 
-  // CS HIGH antes de iniciar
+  // CS HIGH antes de iniciar — manter alto durante estabilização
   pinMode(SD_CS_PIN, OUTPUT);
   digitalWrite(SD_CS_PIN, HIGH);
-  delay(50);
+  delay(500); // espera cartão estabilizar (crítico após reinserção)
 
-  // Uma única tentativa — loop() retenta a cada 60s (evita esgotar slots VFS)
-  if (!SD.begin(SD_CS_PIN)) {
+  // 400 kHz — frequência mínima para estabilidade em breadboard
+  if (!SD.begin(SD_CS_PIN, SPI, 400000)) {
     Serial.println("✗ Falha ao inicializar cartão SD!");
     Serial.println("Verifique:");
     Serial.println("  1. Cartão inserido e formatado em FAT32");
-    Serial.println("  2. Conexoes: CS=GPIO5 | CLK=GPIO18 | MOSI=GPIO23 | MISO=GPIO19");
+    Serial.println("  2. Conexoes: CS=GPIO15 | CLK=GPIO18 | MOSI=GPIO23 | MISO=GPIO19");
     Serial.println("  3. VCC = 3.3V (modulo nativo 3.3V, sem AMS1117)");
     Serial.println("  4. Capacitor 10uF~47uF entre VCC e GND do modulo");
     estado.cartaoSDconectado = false;

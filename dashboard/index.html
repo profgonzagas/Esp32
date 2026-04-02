@@ -310,7 +310,6 @@ const MQTT_CONFIG = {
 // ============================
 // ESTADO
 // ============================
-const MAX_POINTS = 500;
 let client = null;
 let dataHistory = JSON.parse(localStorage.getItem('necrosense_data') || '[]');
 let charts = {};
@@ -431,7 +430,6 @@ function processData(raw) {
     };
 
     dataHistory.push(entry);
-    if (dataHistory.length > MAX_POINTS) dataHistory = dataHistory.slice(-MAX_POINTS);
     
     // Persistir no localStorage
     try { localStorage.setItem('necrosense_data', JSON.stringify(dataHistory)); } catch(e) {}
