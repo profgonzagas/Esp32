@@ -363,10 +363,11 @@ const MQTT_CONFIG = {
 // ============================
 // ESTADO
 // ============================
-let client  = null;
-let fbDb    = null;   // instancia do Firebase Realtime Database
+let client    = null;
+let fbDb      = null;   // instancia do Firebase Realtime Database
 let dataHistory = [];
-let charts  = {};
+let charts    = {};
+let fbSaveCount = 0;
 
 // ============================
 // FIREBASE
@@ -465,7 +466,14 @@ function setFbStatus(ok, msg) {
 function fbSave(entry) {
     if (!fbDb) return;
     fbDb.ref('leituras').push(entry)
-        .catch(e => addLog('err', 'Erro ao salvar Firebase: ' + e.message));
+        .then(() => {
+            fbSaveCount++;
+            setFbStatus(true, 'Firebase: ' + fbSaveCount + ' salvo' + (fbSaveCount > 1 ? 's' : ''));
+        })
+        .catch(e => {
+            addLog('err', 'Erro ao salvar Firebase: ' + e.message);
+            setFbStatus(false, 'Erro ao salvar');
+        });
 }
 
 function loadFromFirebase() {
@@ -810,7 +818,9 @@ function addLog(type, msg) {
 }
 
 function toggleLog() {
-    document.getElementById('logPanel').classList.toggle('visible');
+    const panel = document.getElementById('logPanel');
+    panel.classList.toggle('visible');
+    if (panel.classList.contains('visible')) panel.scrollIntoView({ behavior: 'smooth' });
 }
 
 // ============================
