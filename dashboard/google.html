@@ -225,6 +225,7 @@
         <button class="fb-btn" onclick="openFbModal()">&#128293; Firebase</button>
         <button onclick="toggleLog()">&#128220; Log</button>
         <button onclick="exportCSV()">&#128202; Exportar CSV</button>
+        <button class="fb-btn" onclick="exportFromFirebase()">&#9729; Exportar Firebase</button>
         <button onclick="clearData()">&#128465; Limpar</button>
         <button id="btnConnect" class="primary" onclick="toggleConnection()">Conectar</button>
     </div>
@@ -786,6 +787,62 @@ function exportCSV() {
     URL.revokeObjectURL(url);
 
     addLog('ok', 'CSV exportado: ' + dataHistory.length + ' registros');
+}
+
+// ============================
+// EXPORTAR TUDO DO FIREBASE
+// ============================
+function exportFromFirebase() {
+    if (!fbDb) { alert('Firebase nao esta configurado.'); return; }
+    addLog('fb', 'Buscando todos os registros do Firebase...');
+    setFbStatus(true, 'Firebase: carregando...');
+
+    fbDb.ref('leituras').orderByKey().once('value')
+        .then(snap => {
+            if (!snap.exists()) {
+                alert('Nenhum dado encontrado no Firebase.');
+                setFbStatus(true, 'Firebase: sem dados');
+                return;
+            }
+            const todos = Object.values(snap.val());
+            todos.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+            const headers = [
+                'Data/Hora',
+                'Temp BME280 (°C)', 'Umidade BME280 (%)', 'Pressao (hPa)',
+                'Temp DHT22 (°C)',  'Umidade DHT22 (%)',
+                'Indice UV', 'Nivel UV',
+                'Luminosidade (%)', 'LDR Nivel',
+                'Uptime (s)', 'SD Card'
+            ];
+
+            const rows = todos.map(d => [
+                new Date(d.timestamp).toLocaleString('pt-BR'),
+                d.temp_bme, d.umid_bme, d.pressao,
+                d.temp_dht, d.umid_dht,
+                d.indice_uv, d.nivel_uv,
+                d.ldr_pct, d.ldr_nivel,
+                d.uptime, d.sd_card
+            ].join(';'));
+
+            const bom = '\uFEFF';
+            const csv = bom + headers.join(';') + '\n' + rows.join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url  = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'necrosense_firebase_' + new Date().toISOString().slice(0, 10) + '.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+
+            setFbStatus(true, 'Firebase: ' + todos.length + ' registros');
+            addLog('fb', 'CSV exportado do Firebase: ' + todos.length + ' registros');
+        })
+        .catch(e => {
+            addLog('err', 'Erro ao exportar Firebase: ' + e.message);
+            setFbStatus(false, 'Erro ao exportar');
+        });
 }
 
 // ============================
