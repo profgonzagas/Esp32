@@ -95,6 +95,10 @@ unsigned long ultimaTentativaMQTT = 0;
 const unsigned long INTERVALO_RETRY_MQTT = 5000; // Retry a cada 5s
 bool mqttConectado = false;
 
+// Firebase - timer COMPLETAMENTE independente do MQTT
+unsigned long ultimaSalvagemFirebase = 0;
+const unsigned long FIREBASE_INTERVAL = 30000; // Salvar a cada 30s
+
 // LED Blink
 unsigned long ultimoBlink = 0;
 bool ledBlinkState = false;
@@ -1745,15 +1749,13 @@ void gerenciarMQTT() {
     mqttClient.loop();
   }
   
-  // Publicar sensores e salvar no Firebase periodicamente
-  // Firebase funciona INDEPENDENTE do MQTT
+  // Publicar sensores via MQTT periodicamente
   unsigned long agora = millis();
   if (agora - ultimaPublicacaoMQTT >= MQTT_PUBLISH_INTERVAL) {
     ultimaPublicacaoMQTT = agora;
     if (mqttClient.connected()) {
       publicarSensoresMQTT();
     }
-    salvarNoFirebase();
   }
 }
 
@@ -1853,6 +1855,15 @@ void loop() {
   
   // Gerenciar MQTT (conectar/reconectar/publicar)
   gerenciarMQTT();
+
+  // Firebase: salvar independente do estado do MQTT
+  if (WiFi.status() == WL_CONNECTED) {
+    unsigned long agoraFb = millis();
+    if (agoraFb - ultimaSalvagemFirebase >= FIREBASE_INTERVAL) {
+      ultimaSalvagemFirebase = agoraFb;
+      salvarNoFirebase();
+    }
+  }
   
   // Atualizar leituras periódicas
   static unsigned long ultimaLeitura = 0;
