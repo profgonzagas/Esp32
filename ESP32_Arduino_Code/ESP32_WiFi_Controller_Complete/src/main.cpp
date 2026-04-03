@@ -99,6 +99,7 @@ bool mqttConectado = false;
 
 // Firebase - timer independente do MQTT
 unsigned long ultimaSalvagemFirebase = 0;
+unsigned long fbSaveCount = 0;
 const unsigned long FIREBASE_INTERVAL = 30000; // Salvar a cada 30s
 
 // LED Blink
@@ -1741,7 +1742,7 @@ void gerenciarMQTT() {
 
 /**
  * Salva leitura dos sensores diretamente no Firebase via HTTPS.
- * Chamada pelo loop() com timer independente do MQTT.
+ * Roda diretamente no loop() (Core 1). Timeouts agressivos para minimizar bloqueio.
  */
 void salvarNoFirebase() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -1785,24 +1786,65 @@ void salvarNoFirebase() {
   char body[512];
   serializeJson(doc, body);
 
-  // Objetos locais na stack da task - nao compartilhados com o loop()
-  WiFiClientSecure fbClient;
-  fbClient.setInsecure();
-  fbClient.setTimeout(10);
+  Serial.printf("[Firebase] Tentando salvar... (heap: %u)\n", ESP.getFreeHeap());
+
+  // Desconectar MQTT para liberar a sessao TLS do espClient global
+  if (mqttClient.connected()) {
+    Serial.println("[Firebase] Pausando MQTT...");
+    mqttClient.disconnect();
+    mqttConectado = false;
+  }
+  espClient.stop();   // Liberar TLS mesmo que MQTT ja estivesse desconectado
+  delay(500);          // Tempo para TCP stack liberar buffers e heap consolidar
+
+  uint32_t heapLivre = ESP.getFreeHeap();
+  Serial.printf("[Firebase] Heap apos liberar espClient: %u\n", heapLivre);
+  if (heapLivre < 30000) {
+    Serial.println("[Firebase] Heap insuficiente, pulando save");
+    ultimaTentativaMQTT = 0;
+    return;
+  }
+
+  // Reutilizar espClient global (evita alocar segundo WiFiClientSecure ~40KB)
+  espClient.setInsecure();
+  espClient.setTimeout(15); // 15s para handshake TLS do Firebase
+
   HTTPClient https;
-  https.setTimeout(10000);
-  if (https.begin(fbClient, FIREBASE_URL)) {
+  https.setTimeout(15000);
+  https.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+  bool sucesso = false;
+  Serial.println("[Firebase] Conectando HTTPS...");
+  if (https.begin(espClient, FIREBASE_URL)) {
     https.addHeader("Content-Type", "application/json");
+    Serial.println("[Firebase] Enviando POST...");
     int code = https.POST(body);
+    String payload = https.getString();
     if (code == 200 || code == 201 || code == 204) {
-      Serial.println("[Firebase] \u2713 Salvo (Core 0)");
+      fbSaveCount++;
+      sucesso = true;
+      Serial.printf("[Firebase] OK #%lu (HTTP %d, heap: %u)\n", fbSaveCount, code, ESP.getFreeHeap());
+    } else if (code < 0) {
+      Serial.printf("[Firebase] ERRO conexao: %s (code: %d, heap: %u)\n", https.errorToString(code).c_str(), code, ESP.getFreeHeap());
     } else {
-      Serial.printf("[Firebase] \u2717 Erro HTTP: %d\n", code);
+      Serial.printf("[Firebase] ERRO HTTP %d: %s (heap: %u)\n", code, payload.c_str(), ESP.getFreeHeap());
     }
     https.end();
   } else {
-    Serial.println("[Firebase] \u2717 Falha ao conectar");
+    Serial.printf("[Firebase] Falha https.begin() (heap: %u)\n", ESP.getFreeHeap());
   }
+
+  // Limpar e permitir MQTT reconectar no proximo ciclo
+  espClient.stop();
+  delay(50);
+  ultimaTentativaMQTT = 0; // Reconectar MQTT imediatamente
+
+  // Se falhou (heap fragmentado), retry rapido em 5s em vez de esperar 30s
+  if (!sucesso) {
+    ultimaSalvagemFirebase = millis() - FIREBASE_INTERVAL + 5000;
+    Serial.println("[Firebase] Retry em 5s...");
+  }
+  Serial.printf("[Firebase] Finalizado (heap: %u)\n", ESP.getFreeHeap());
 }
 
 // ==================== SETUP ====================
@@ -1913,7 +1955,7 @@ void loop() {
   // Gerenciar MQTT (conectar/reconectar/publicar)
   gerenciarMQTT();
 
-  // Firebase: salvar independente do estado do MQTT
+  // Firebase: salvar a cada 30s (roda no loop, bloqueia ~5-15s mas garante que funciona)
   if (WiFi.status() == WL_CONNECTED) {
     unsigned long agoraFb = millis();
     if (agoraFb - ultimaSalvagemFirebase >= FIREBASE_INTERVAL) {
