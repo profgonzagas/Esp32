@@ -95,8 +95,8 @@ unsigned long ultimaTentativaMQTT = 0;
 const unsigned long INTERVALO_RETRY_MQTT = 60000; // Retry a cada 60s (evitar bloquear o loop)
 bool mqttConectado = false;
 
-// Firebase - timer COMPLETAMENTE independente do MQTT
-unsigned long ultimaSalvagemFirebase = 0;
+// Firebase - executa em task FreeRTOS separada (Core 0)
+TaskHandle_t firebaseTaskHandle = NULL;
 const unsigned long FIREBASE_INTERVAL = 30000; // Salvar a cada 30s
 
 // LED Blink
@@ -181,6 +181,7 @@ void publicarSensoresMQTT();
 void publicarStatusMQTT();
 void callbackMQTT(char* topic, byte* payload, unsigned int length);
 void salvarNoFirebase();
+void taskFirebase(void *pvParameters);
 void inicializarNTP();
 
 class MyServerCallbacks: public BLEServerCallbacks {
@@ -1659,9 +1660,13 @@ void inicializarNTP() {
 
 /**
  * Salva leitura dos sensores diretamente no Firebase via HTTPS
+ * Chamada APENAS pela task FreeRTOS (Core 0) - nunca do loop principal
  */
 void salvarNoFirebase() {
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[Firebase] WiFi desconectado, pulando...");
+    return;
+  }
 
   // Montar timestamp ISO8601
   char timestamp[30] = "";
@@ -1669,11 +1674,10 @@ void salvarNoFirebase() {
   if (getLocalTime(&timeinfo)) {
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S-03:00", &timeinfo);
   } else {
-    // Fallback: uptime em ms
     snprintf(timestamp, sizeof(timestamp), "uptime_%lu", millis());
   }
 
-  // Montar JSON
+  // Montar JSON com diagnostico
   StaticJsonDocument<512> doc;
   doc["timestamp"] = timestamp;
   if (estado.bme280Disponivel) {
@@ -1689,30 +1693,51 @@ void salvarNoFirebase() {
     doc["indice_uv"] = round(estado.indiceUV * 100) / 100.0;
     doc["ldr_nivel"] = estado.nivelUV;
   }
-  doc["uptime"]   = millis() / 1000;
-  doc["sd_card"]  = estado.cartaoSDconectado;
+  doc["uptime"]    = millis() / 1000;
+  doc["sd_card"]   = estado.cartaoSDconectado;
+  doc["wifi_rssi"] = WiFi.RSSI();
+  doc["free_heap"] = ESP.getFreeHeap();
+  doc["mqtt_ok"]   = mqttConectado;
 
   char body[512];
   serializeJson(doc, body);
 
-  // Enviar via HTTPS
+  // Enviar via HTTPS (objetos locais na stack da task)
   WiFiClientSecure fbClient;
-  fbClient.setInsecure(); // Aceita qualquer certificado (sem validacao de CA)
-  fbClient.setTimeout(8000); // Timeout de 8 segundos para nao travar o loop
+  fbClient.setInsecure();
+  fbClient.setTimeout(10); // 10 segundos max para TLS handshake
   HTTPClient https;
-  https.setTimeout(8000); // Timeout total da operacao HTTP
+  https.setTimeout(10000); // 10s timeout total
   if (https.begin(fbClient, FIREBASE_URL)) {
     https.addHeader("Content-Type", "application/json");
     int code = https.POST(body);
     if (code == 200 || code == 204 || code == 201) {
-      Serial.println("[Firebase] ✓ Dado salvo");
+      Serial.println("[Firebase] ✓ Dado salvo (task Core 0)");
     } else {
-      Serial.print("[Firebase] ✗ Erro HTTP: ");
-      Serial.println(code);
+      Serial.printf("[Firebase] ✗ Erro HTTP: %d\n", code);
     }
     https.end();
   } else {
     Serial.println("[Firebase] ✗ Falha ao conectar");
+  }
+}
+
+/**
+ * Task FreeRTOS para Firebase - roda no Core 0, completamente independente do loop()
+ * Mesmo que o MQTT bloqueie o loop no Core 1, esta task continua salvando.
+ */
+void taskFirebase(void *pvParameters) {
+  Serial.println("[Firebase] Task iniciada no Core 0");
+  
+  // Esperar WiFi conectar
+  while (WiFi.status() != WL_CONNECTED) {
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+  Serial.println("[Firebase] WiFi detectado, iniciando salvamentos");
+  
+  for (;;) {
+    salvarNoFirebase();
+    vTaskDelay(pdMS_TO_TICKS(FIREBASE_INTERVAL));
   }
 }
 
@@ -1800,6 +1825,18 @@ void setup() {
   // Inicializar MQTT (HiveMQ Cloud)
   inicializarMQTT();
   
+  // Iniciar task Firebase no Core 0 (independente do loop que roda no Core 1)
+  xTaskCreatePinnedToCore(
+    taskFirebase,        // Funcao da task
+    "FirebaseTask",      // Nome
+    8192,                // Stack size (bytes) - TLS precisa de bastante
+    NULL,                // Parametro
+    1,                   // Prioridade (1 = normal)
+    &firebaseTaskHandle, // Handle
+    0                    // Core 0 (loop() roda no Core 1)
+  );
+  Serial.println("[Firebase] Task criada no Core 0");
+  
   // Configurar rotas
   configurarRotas();
   
@@ -1858,14 +1895,7 @@ void loop() {
   // Gerenciar MQTT (conectar/reconectar/publicar)
   gerenciarMQTT();
 
-  // Firebase: salvar independente do estado do MQTT
-  if (WiFi.status() == WL_CONNECTED) {
-    unsigned long agoraFb = millis();
-    if (agoraFb - ultimaSalvagemFirebase >= FIREBASE_INTERVAL) {
-      ultimaSalvagemFirebase = agoraFb;
-      salvarNoFirebase();
-    }
-  }
+  // Firebase roda em task separada no Core 0 (taskFirebase)
   
   // Atualizar leituras periódicas
   static unsigned long ultimaLeitura = 0;

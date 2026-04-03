@@ -336,8 +336,8 @@ function loginAndConnect() {
     if (!user || !pass) { alert('Preencha usuario e senha'); return; }
     MQTT_CONFIG.username = user;
     MQTT_CONFIG.password = pass;
-    // Salvar na sessao (apaga ao fechar o navegador)
-    try { sessionStorage.setItem('mqtt_u', user); sessionStorage.setItem('mqtt_p', pass); } catch(e) {}
+    // Salvar localmente (persiste entre sessoes)
+    try { localStorage.setItem('mqtt_u', user); localStorage.setItem('mqtt_p', pass); } catch(e) {}
     document.getElementById('loginModal').classList.add('hidden');
     connect();
 }
@@ -647,9 +647,9 @@ function toggleLog() {
 // ============================
 window.addEventListener('DOMContentLoaded', () => {
     initCharts();
-    // Restaurar credenciais da sessao
-    const savedU = sessionStorage.getItem('mqtt_u');
-    const savedP = sessionStorage.getItem('mqtt_p');
+    // Restaurar credenciais salvas
+    const savedU = localStorage.getItem('mqtt_u');
+    const savedP = localStorage.getItem('mqtt_p');
     if (savedU && savedP) {
         MQTT_CONFIG.username = savedU;
         MQTT_CONFIG.password = savedP;

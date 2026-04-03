@@ -281,4 +281,6 @@
  C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/mbedtls/port/include/aes/esp_aes.h \
  C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/hal/include/hal/aes_types.h \
  C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/mbedtls/mbedtls/include/mbedtls/error.h \
+ C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/libraries/HTTPClient/src/HTTPClient.h \
+ C:/Users/quimi/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiClient.h \
  .pio/libdeps/esp32dev/PubSubClient/src/PubSubClient.h src/secrets.h

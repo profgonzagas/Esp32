@@ -549,7 +549,7 @@ function loginAndConnect() {
     if (!user || !pass) { alert('Preencha usuario e senha'); return; }
     MQTT_CONFIG.username = user;
     MQTT_CONFIG.password = pass;
-    try { sessionStorage.setItem('mqtt_u', user); sessionStorage.setItem('mqtt_p', pass); } catch(e) {}
+    try { localStorage.setItem('mqtt_u', user); localStorage.setItem('mqtt_p', pass); } catch(e) {}
     document.getElementById('loginModal').classList.add('hidden');
     connect();
 }
@@ -903,9 +903,9 @@ window.addEventListener('DOMContentLoaded', () => {
         addLog('fb', 'Firebase nao configurado. Clique no botao "Firebase" para configurar.');
     }
 
-    // Restaurar credenciais MQTT da sessao
-    const savedU = sessionStorage.getItem('mqtt_u');
-    const savedP = sessionStorage.getItem('mqtt_p');
+    // Restaurar credenciais MQTT salvas
+    const savedU = localStorage.getItem('mqtt_u');
+    const savedP = localStorage.getItem('mqtt_p');
     if (savedU && savedP) {
         MQTT_CONFIG.username = savedU;
         MQTT_CONFIG.password = savedP;

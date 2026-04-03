@@ -26,6 +26,7 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <PubSubClient.h>
 #include "secrets.h"  // Credenciais WiFi e MQTT (não commitado)
 
@@ -53,6 +54,9 @@ const unsigned long MQTT_PUBLISH_INTERVAL = 30000; // Publicar a cada 30 segundo
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_TX   "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define CHARACTERISTIC_RX   "beb5483e-36e1-4688-b7f5-ea07361b26a9"
+
+// ==================== CONFIGURAÇÕES FIREBASE ====================
+#define FIREBASE_URL "https://necrosense-ed82a-default-rtdb.firebaseio.com/leituras.json"
 
 // ==================== CONFIGURAÇÕES DE HARDWARE ====================
 #define LED_INTERNO 2       // LED interno (pisca automático)
@@ -90,8 +94,12 @@ WiFiClientSecure espClient;
 PubSubClient mqttClient(espClient);
 unsigned long ultimaPublicacaoMQTT = 0;
 unsigned long ultimaTentativaMQTT = 0;
-const unsigned long INTERVALO_RETRY_MQTT = 5000; // Retry a cada 5s
+const unsigned long INTERVALO_RETRY_MQTT = 60000; // Retry a cada 60s (evitar bloquear o loop)
 bool mqttConectado = false;
+
+// Firebase - timer independente do MQTT
+unsigned long ultimaSalvagemFirebase = 0;
+const unsigned long FIREBASE_INTERVAL = 30000; // Salvar a cada 30s
 
 // LED Blink
 unsigned long ultimoBlink = 0;
@@ -183,6 +191,7 @@ void publicarSensoresMQTT();
 void publicarStatusMQTT();
 void callbackMQTT(char* topic, byte* payload, unsigned int length);
 void gerenciarMQTT();
+void salvarNoFirebase();
 
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -1603,6 +1612,10 @@ void conectarMQTT() {
   Serial.print("[MQTT] Conectando a ");
   Serial.print(mqtt_server);
   Serial.print("...");
+
+  // Timeouts curtos para nao bloquear o loop (WDT dispara apos ~15s)
+  espClient.setTimeout(5);      // Max 5s para TLS handshake
+  mqttClient.setSocketTimeout(3); // Max 3s por leitura/escrita
   
   if (mqttClient.connect(mqtt_client_id, mqtt_user, mqtt_password)) {
     mqttConectado = true;
@@ -1726,6 +1739,72 @@ void gerenciarMQTT() {
   }
 }
 
+/**
+ * Salva leitura dos sensores diretamente no Firebase via HTTPS.
+ * Chamada pelo loop() com timer independente do MQTT.
+ */
+void salvarNoFirebase() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[Firebase] WiFi desconectado, pulando...");
+    return;
+  }
+
+  char timestamp[30] = "";
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo)) {
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S-03:00", &timeinfo);
+  } else {
+    snprintf(timestamp, sizeof(timestamp), "uptime_%lu", millis());
+  }
+
+  StaticJsonDocument<512> doc;
+  doc["timestamp"] = timestamp;
+  if (estado.bme280Disponivel) {
+    doc["temp_bme"] = round(estado.temperatura_bme280 * 100) / 100.0;
+    doc["umid_bme"] = round(estado.umidade_bme280    * 100) / 100.0;
+    doc["pressao"]  = round(estado.pressao            * 100) / 100.0;
+  }
+  if (estado.dht22Disponivel) {
+    doc["temp_dht"] = round(estado.temperatura_dht22 * 100) / 100.0;
+    doc["umid_dht"] = round(estado.umidade_dht22     * 100) / 100.0;
+  }
+  if (estado.uvDisponivel) {
+    doc["indice_uv"] = round(estado.indiceUV * 100) / 100.0;
+    doc["nivel_uv"]  = estado.nivelUV;
+  }
+  if (estado.ldrDisponivel) {
+    doc["ldr_pct"]   = round(estado.luminosidade * 100) / 100.0;
+    doc["ldr_nivel"] = estado.nivelLDR;
+  }
+  doc["uptime"]    = millis() / 1000;
+  doc["sd_card"]   = estado.cartaoSDconectado;
+  doc["wifi_rssi"] = WiFi.RSSI();
+  doc["free_heap"] = ESP.getFreeHeap();
+  doc["mqtt_ok"]   = mqttConectado;
+
+  char body[512];
+  serializeJson(doc, body);
+
+  // Objetos locais na stack da task - nao compartilhados com o loop()
+  WiFiClientSecure fbClient;
+  fbClient.setInsecure();
+  fbClient.setTimeout(10);
+  HTTPClient https;
+  https.setTimeout(10000);
+  if (https.begin(fbClient, FIREBASE_URL)) {
+    https.addHeader("Content-Type", "application/json");
+    int code = https.POST(body);
+    if (code == 200 || code == 201 || code == 204) {
+      Serial.println("[Firebase] \u2713 Salvo (Core 0)");
+    } else {
+      Serial.printf("[Firebase] \u2717 Erro HTTP: %d\n", code);
+    }
+    https.end();
+  } else {
+    Serial.println("[Firebase] \u2717 Falha ao conectar");
+  }
+}
+
 // ==================== SETUP ====================
 void setup() {
   Serial.begin(115200);
@@ -1765,7 +1844,17 @@ void setup() {
   
   // Inicializar MQTT (HiveMQ Cloud)
   inicializarMQTT();
-  
+
+  // Sincronizar hora via NTP (UTC-3 Brasilia)
+  configTime(-3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.print("[NTP] Sincronizando hora");
+  struct tm ti;
+  for (int i = 0; i < 10 && !getLocalTime(&ti); i++) { delay(500); Serial.print("."); }
+  if (getLocalTime(&ti)) { char buf[30]; strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &ti); Serial.printf("\n[NTP] ✓ %s\n", buf); }
+  else Serial.println("\n[NTP] ✗ Falha (usará uptime no timestamp)");
+
+  Serial.println("[Firebase] Timer ativo no loop() - salva a cada 30s independente do MQTT");
+
   // Configurar rotas
   configurarRotas();
   
@@ -1823,7 +1912,16 @@ void loop() {
   
   // Gerenciar MQTT (conectar/reconectar/publicar)
   gerenciarMQTT();
-  
+
+  // Firebase: salvar independente do estado do MQTT
+  if (WiFi.status() == WL_CONNECTED) {
+    unsigned long agoraFb = millis();
+    if (agoraFb - ultimaSalvagemFirebase >= FIREBASE_INTERVAL) {
+      ultimaSalvagemFirebase = agoraFb;
+      salvarNoFirebase();
+    }
+  }
+
   // Atualizar leituras periódicas
   static unsigned long ultimaLeitura = 0;
   static int tentativasDHT22 = 0;
