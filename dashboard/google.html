@@ -639,8 +639,7 @@ function processData(raw) {
 
     dataHistory.push(entry);
 
-    // Salvar no Firebase (persistencia na nuvem)
-    fbSave(entry);
+    // ESP32 salva direto no Firebase a cada 30s (nao duplicar aqui)
 
     updateSummary(entry);
     updateCharts();
