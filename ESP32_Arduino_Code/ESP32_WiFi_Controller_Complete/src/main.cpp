@@ -1631,8 +1631,8 @@ void conectarMQTT() {
     String onlineMsg = "{\"status\":\"online\",\"ip\":\"" + WiFi.localIP().toString() + "\",\"dispositivo\":\"NecroSENSE ESP32\"}";
     mqttClient.publish(MQTT_TOPIC_STATUS, onlineMsg.c_str(), true); // retain=true
     
-    // Publicar sensores imediatamente
-    publicarSensoresMQTT();
+    // Aguardar timer de 30s para primeira publicacao (evita duplicata no reconnect apos Firebase)
+    ultimaPublicacaoMQTT = millis();
   } else {
     mqttConectado = false;
     Serial.print(" ✗ Falha (rc=");
