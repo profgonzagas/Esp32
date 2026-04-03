@@ -27,7 +27,10 @@
 #include <BLE2902.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <esp_task_wdt.h>   // Watchdog Timer — reinicia ESP32 se travar
 #include "secrets.h"  // Credenciais WiFi (não commitado)
+
+#define WDT_TIMEOUT_S 30  // Watchdog: reinicia se loop() travar por 30s
 
 // ==================== CONFIGURAÇÕES DE REDE ====================
 const char* ssid = WIFI_SSID;
@@ -1534,13 +1537,15 @@ void salvarNoFirebase() {
 
   Serial.printf("[Firebase] Tentando salvar... (heap: %u)\n", ESP.getFreeHeap());
 
+  esp_task_wdt_reset(); // Alimentar WDT antes de operacao longa
+
   espClient.stop();   // Liberar conexao anterior
   delay(300);          // Aguardar heap consolidar
 
   uint32_t heapLivre = ESP.getFreeHeap();
   Serial.printf("[Firebase] Heap apos liberar espClient: %u\n", heapLivre);
-  if (heapLivre < 30000) {
-    Serial.println("[Firebase] Heap insuficiente, pulando save");
+  if (heapLivre < 35000) {
+    Serial.printf("[Firebase] Heap insuficiente (%u < 35000), pulando save\n", heapLivre);
     return;
   }
 
@@ -1553,6 +1558,7 @@ void salvarNoFirebase() {
   https.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   bool sucesso = false;
+  esp_task_wdt_reset(); // Alimentar WDT antes do TLS handshake
   Serial.println("[Firebase] Conectando HTTPS...");
   if (https.begin(espClient, FIREBASE_URL)) {
     https.addHeader("Content-Type", "application/json");
@@ -1601,6 +1607,11 @@ void setup() {
   digitalWrite(RELE1_PIN, LOW);
   digitalWrite(RELE2_PIN, LOW);
   
+  // Habilitar Watchdog Timer — se loop() travar >30s, ESP32 reinicia sozinho
+  esp_task_wdt_init(WDT_TIMEOUT_S, true);  // true = panico (reset)
+  esp_task_wdt_add(NULL);                  // registrar task atual (loopTask)
+  Serial.printf("[WDT] Watchdog ativo: %ds timeout\n", WDT_TIMEOUT_S);
+
   Serial.println("\n\n╔════════════════════════════════════╗");
   Serial.println("║   NecroSENSE - Controlador ESP32   ║");
   Serial.println("║  WiFi + BLE + BME280 + DHT22 + UV   ║");
@@ -1674,6 +1685,16 @@ void setup() {
 
 // ==================== LOOP ====================
 void loop() {
+  // Alimentar Watchdog — se nao chegar aqui em 30s, ESP32 reinicia
+  esp_task_wdt_reset();
+
+  // Auto-restart preventivo: heap muito baixo = crash iminente
+  if (ESP.getFreeHeap() < 20000) {
+    Serial.printf("[WDT] HEAP CRITICO: %u bytes — reiniciando ESP32!\n", ESP.getFreeHeap());
+    delay(100);
+    ESP.restart();
+  }
+
   // Piscar LED azul para indicar funcionamento
   piscarLED();
   
