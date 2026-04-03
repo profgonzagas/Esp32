@@ -92,7 +92,7 @@ WiFiClientSecure espClient;
 PubSubClient mqttClient(espClient);
 unsigned long ultimaPublicacaoMQTT = 0;
 unsigned long ultimaTentativaMQTT = 0;
-const unsigned long INTERVALO_RETRY_MQTT = 5000; // Retry a cada 5s
+const unsigned long INTERVALO_RETRY_MQTT = 60000; // Retry a cada 60s (evitar bloquear o loop)
 bool mqttConectado = false;
 
 // Firebase - timer COMPLETAMENTE independente do MQTT
@@ -1559,7 +1559,9 @@ void conectarMQTT() {
   Serial.print(mqtt_server);
   Serial.print("...");
   
-  mqttClient.setSocketTimeout(3); // Max 3s por tentativa de conexao MQTT
+  // Timeouts para nao bloquear o loop
+  espClient.setTimeout(5); // Max 5s no handshake TCP/TLS
+  mqttClient.setSocketTimeout(3); // Max 3s por operacao de leitura/escrita
   if (mqttClient.connect(mqtt_client_id, mqtt_user, mqtt_password)) {
     mqttConectado = true;
     Serial.println(" ✓ Conectado!");
