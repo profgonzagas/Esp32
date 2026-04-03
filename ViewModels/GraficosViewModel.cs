@@ -14,6 +14,7 @@ public class GraficosViewModel : BaseViewModel
     private Chart? _graficoPressao;
     private Chart? _graficoUV;
     private Chart? _graficoLuminosidade;
+    private Chart? _graficoTempDHT;
     private string _statusMensagem = "";
     private bool _mqttConectado;
     private DadosSensores? _ultimoDado;
@@ -46,6 +47,12 @@ public class GraficosViewModel : BaseViewModel
     {
         get => _graficoLuminosidade;
         set => SetProperty(ref _graficoLuminosidade, value);
+    }
+
+    public Chart? GraficoTempDHT
+    {
+        get => _graficoTempDHT;
+        set => SetProperty(ref _graficoTempDHT, value);
     }
 
     public string StatusMensagem
@@ -141,36 +148,40 @@ public class GraficosViewModel : BaseViewModel
             return;
         }
 
-        GraficoTemperatura = CriarGraficoLinha(
+        // Cores iguais ao dashboard web
+        GraficoTemperatura = CriarGraficoArea(
             historico, d => d.Temperatura, "°C",
-            SKColor.Parse("#FF5722"), SKColor.Parse("#FFCCBC"));
+            SKColor.Parse("#E85D5D"));
 
-        GraficoUmidade = CriarGraficoLinha(
+        GraficoUmidade = CriarGraficoArea(
             historico, d => d.Umidade, "%",
-            SKColor.Parse("#2196F3"), SKColor.Parse("#BBDEFB"));
+            SKColor.Parse("#2E86DE"));
 
-        GraficoPressao = CriarGraficoLinha(
+        GraficoPressao = CriarGraficoArea(
             historico, d => d.Pressao, "hPa",
-            SKColor.Parse("#9C27B0"), SKColor.Parse("#E1BEE7"));
+            SKColor.Parse("#26D07C"));
 
-        GraficoUV = CriarGraficoLinha(
+        GraficoTempDHT = CriarGraficoArea(
+            historico, d => d.TemperaturaDHT22, "°C",
+            SKColor.Parse("#F7A41D"));
+
+        GraficoUV = CriarGraficoArea(
             historico, d => d.IndiceUV, "UV",
-            SKColor.Parse("#FF9800"), SKColor.Parse("#FFE0B2"));
+            SKColor.Parse("#A371F7"));
 
-        GraficoLuminosidade = CriarGraficoLinha(
+        GraficoLuminosidade = CriarGraficoArea(
             historico, d => d.LdrPercentual, "%",
-            SKColor.Parse("#FFC107"), SKColor.Parse("#FFF8E1"));
+            SKColor.Parse("#F0C674"));
     }
 
-    private static LineChart CriarGraficoLinha(
+    private static LineChart CriarGraficoArea(
         IReadOnlyList<DadosSensores> historico,
         Func<DadosSensores, float> selector,
         string sufixo,
-        SKColor corLinha,
-        SKColor corFundo)
+        SKColor cor)
     {
         var entries = new List<ChartEntry>();
-        int passo = Math.Max(1, historico.Count / 15); // máx ~15 labels no eixo X
+        int passo = Math.Max(1, historico.Count / 10);
 
         for (int i = 0; i < historico.Count; i++)
         {
@@ -178,35 +189,39 @@ public class GraficosViewModel : BaseViewModel
             var valor = selector(d);
             entries.Add(new ChartEntry(valor)
             {
-                Color = corLinha,
+                Color = cor,
                 Label = i % passo == 0 ? d.UltimaAtualizacao.ToString("HH:mm") : "",
                 ValueLabel = i == historico.Count - 1 ? $"{valor:F1}{sufixo}" : ""
             });
         }
 
+        float minVal = entries.Min(e => e.Value ?? 0);
+        float maxVal = entries.Max(e => e.Value ?? 0);
+        float margin = Math.Max((maxVal - minVal) * 0.1f, 1f);
+
         return new LineChart
         {
             Entries = entries,
             LineMode = LineMode.Spline,
-            LineSize = 3,
-            PointMode = PointMode.Circle,
-            PointSize = historico.Count > 20 ? 6 : 10,
+            LineSize = 4,
+            PointMode = PointMode.None,
             BackgroundColor = SKColors.Transparent,
-            LabelColor = SKColor.Parse("#999999"),
-            LabelTextSize = 24,
+            LabelColor = SKColor.Parse("#555555"),
+            LabelTextSize = 22,
             AnimationDuration = TimeSpan.FromMilliseconds(300),
-            MinValue = entries.Min(e => e.Value ?? 0) * 0.95f,
-            MaxValue = entries.Max(e => e.Value ?? 0) * 1.05f
+            MinValue = minVal - margin,
+            MaxValue = maxVal + margin
         };
     }
 
     private void CriarGraficosVazios()
     {
-        var entryVazio = new[] { new ChartEntry(0) { Color = SKColor.Parse("#CCCCCC"), Label = "Sem dados" } };
-        var chart = new LineChart { Entries = entryVazio, BackgroundColor = SKColors.Transparent };
+        var entryVazio = new[] { new ChartEntry(0) { Color = SKColor.Parse("#333333"), Label = "Sem dados" } };
+        var chart = new LineChart { Entries = entryVazio, BackgroundColor = SKColors.Transparent, LineMode = LineMode.Spline };
         GraficoTemperatura = chart;
         GraficoUmidade = chart;
         GraficoPressao = chart;
+        GraficoTempDHT = chart;
         GraficoUV = chart;
         GraficoLuminosidade = chart;
     }
