@@ -1624,9 +1624,6 @@ void publicarSensoresMQTT() {
   } else {
     Serial.println("[MQTT] ✗ Falha ao publicar sensores");
   }
-
-  // Salvar tambem no Firebase diretamente
-  salvarNoFirebase();
 }
 
 /**
@@ -1741,16 +1738,19 @@ void gerenciarMQTT() {
   if (!mqttClient.connected()) {
     mqttConectado = false;
     conectarMQTT();
-    return;
+  } else {
+    mqttClient.loop();
   }
   
-  mqttClient.loop();
-  
-  // Publicar sensores periodicamente
+  // Publicar sensores e salvar no Firebase periodicamente
+  // Firebase funciona INDEPENDENTE do MQTT
   unsigned long agora = millis();
   if (agora - ultimaPublicacaoMQTT >= MQTT_PUBLISH_INTERVAL) {
     ultimaPublicacaoMQTT = agora;
-    publicarSensoresMQTT();
+    if (mqttClient.connected()) {
+      publicarSensoresMQTT();
+    }
+    salvarNoFirebase();
   }
 }
 
