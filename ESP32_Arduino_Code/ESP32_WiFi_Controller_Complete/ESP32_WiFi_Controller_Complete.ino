@@ -25,6 +25,7 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <PubSubClient.h>
 #include "secrets.h"  // Credenciais WiFi e MQTT (não commitado)
 
@@ -32,6 +33,9 @@
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 const int PORT = 80;
+
+// ==================== CONFIGURAÇÕES FIREBASE ====================
+#define FIREBASE_URL "https://necrosense-ed82a-default-rtdb.firebaseio.com/leituras.json"
 
 // ==================== CONFIGURAÇÕES MQTT (HiveMQ Cloud) ====================
 const char* mqtt_server = MQTT_SERVER;
@@ -172,7 +176,8 @@ void conectarMQTT();
 void publicarSensoresMQTT();
 void publicarStatusMQTT();
 void callbackMQTT(char* topic, byte* payload, unsigned int length);
-void gerenciarMQTT();
+void salvarNoFirebase();
+void inicializarNTP();
 
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -680,6 +685,8 @@ void inicializarWiFi() {
     Serial.print("Força do sinal: ");
     Serial.print(WiFi.RSSI());
     Serial.println(" dBm");
+    // Sincronizar hora via NTP após WiFi conectar
+    inicializarNTP();
   } else {
     Serial.println("\n✗ Falha na conexão WiFi!");
     Serial.println("Verifique SSID e senha");
@@ -1616,6 +1623,90 @@ void publicarSensoresMQTT() {
     Serial.println("[MQTT] ✓ Sensores publicados");
   } else {
     Serial.println("[MQTT] ✗ Falha ao publicar sensores");
+  }
+
+  // Salvar tambem no Firebase diretamente
+  salvarNoFirebase();
+}
+
+/**
+ * Sincroniza hora via NTP (necessario para timestamp ISO8601)
+ */
+void inicializarNTP() {
+  // UTC-3 (Brasilia)
+  configTime(-3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.print("[NTP] Sincronizando hora");
+  struct tm timeinfo;
+  int tentativas = 0;
+  while (!getLocalTime(&timeinfo) && tentativas < 10) {
+    delay(500);
+    Serial.print(".");
+    tentativas++;
+  }
+  if (getLocalTime(&timeinfo)) {
+    char buf[30];
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &timeinfo);
+    Serial.print("\n[NTP] ✓ Hora sincronizada: ");
+    Serial.println(buf);
+  } else {
+    Serial.println("\n[NTP] ✗ Falha na sincronizacao NTP");
+  }
+}
+
+/**
+ * Salva leitura dos sensores diretamente no Firebase via HTTPS
+ */
+void salvarNoFirebase() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  // Montar timestamp ISO8601
+  char timestamp[30] = "";
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo)) {
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S-03:00", &timeinfo);
+  } else {
+    // Fallback: uptime em ms
+    snprintf(timestamp, sizeof(timestamp), "uptime_%lu", millis());
+  }
+
+  // Montar JSON
+  StaticJsonDocument<512> doc;
+  doc["timestamp"] = timestamp;
+  if (estado.bme280Disponivel) {
+    doc["temp_bme"]  = round(estado.temperatura_bme280 * 100) / 100.0;
+    doc["umid_bme"]  = round(estado.umidade_bme280    * 100) / 100.0;
+    doc["pressao"]   = round(estado.pressao            * 100) / 100.0;
+  }
+  if (estado.dht22Disponivel) {
+    doc["temp_dht"]  = round(estado.temperatura_dht22 * 100) / 100.0;
+    doc["umid_dht"]  = round(estado.umidade_dht22     * 100) / 100.0;
+  }
+  if (estado.uvDisponivel) {
+    doc["indice_uv"] = round(estado.indiceUV * 100) / 100.0;
+    doc["ldr_nivel"] = estado.nivelUV;
+  }
+  doc["uptime"]   = millis() / 1000;
+  doc["sd_card"]  = estado.cartaoSDconectado;
+
+  char body[512];
+  serializeJson(doc, body);
+
+  // Enviar via HTTPS
+  WiFiClientSecure fbClient;
+  fbClient.setInsecure(); // Aceita qualquer certificado (sem validacao de CA)
+  HTTPClient https;
+  if (https.begin(fbClient, FIREBASE_URL)) {
+    https.addHeader("Content-Type", "application/json");
+    int code = https.POST(body);
+    if (code == 200 || code == 204 || code == 201) {
+      Serial.println("[Firebase] ✓ Dado salvo");
+    } else {
+      Serial.print("[Firebase] ✗ Erro HTTP: ");
+      Serial.println(code);
+    }
+    https.end();
+  } else {
+    Serial.println("[Firebase] ✗ Falha ao conectar");
   }
 }
 
