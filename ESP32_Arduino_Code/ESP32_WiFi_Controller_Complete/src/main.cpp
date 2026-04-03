@@ -27,27 +27,12 @@
 #include <BLE2902.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
-#include <PubSubClient.h>
-#include "secrets.h"  // Credenciais WiFi e MQTT (não commitado)
+#include "secrets.h"  // Credenciais WiFi (não commitado)
 
 // ==================== CONFIGURAÇÕES DE REDE ====================
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 const int PORT = 80;
-
-// ==================== CONFIGURAÇÕES MQTT (HiveMQ Cloud) ====================
-const char* mqtt_server = MQTT_SERVER;
-const int mqtt_port = MQTT_PORT;
-const char* mqtt_user = MQTT_USER;
-const char* mqtt_password = MQTT_PASS;
-const char* mqtt_client_id = "ESP32_NecroSENSE";
-
-// Tópicos MQTT
-const char* MQTT_TOPIC_SENSORES = "necrosense/sensores";
-const char* MQTT_TOPIC_STATUS   = "necrosense/status";
-const char* MQTT_TOPIC_COMANDOS = "necrosense/comandos";
-const char* MQTT_TOPIC_RESPOSTA = "necrosense/resposta";
-const unsigned long MQTT_PUBLISH_INTERVAL = 30000; // Publicar a cada 30 segundos
 
 // ==================== CONFIGURAÇÕES BLE ====================
 #define BLE_DEVICE_NAME "ESP32_BLE_001"
@@ -89,15 +74,10 @@ BLECharacteristic* pRxCharacteristic;
 bool bleDeviceConnected = false;
 bool bleOldDeviceConnected = false;
 
-// MQTT
+// WiFiClientSecure para Firebase HTTPS
 WiFiClientSecure espClient;
-PubSubClient mqttClient(espClient);
-unsigned long ultimaPublicacaoMQTT = 0;
-unsigned long ultimaTentativaMQTT = 0;
-const unsigned long INTERVALO_RETRY_MQTT = 60000; // Retry a cada 60s (evitar bloquear o loop)
-bool mqttConectado = false;
 
-// Firebase - timer independente do MQTT
+// Firebase
 unsigned long ultimaSalvagemFirebase = 0;
 unsigned long fbSaveCount = 0;
 const unsigned long FIREBASE_INTERVAL = 30000; // Salvar a cada 30s
@@ -186,12 +166,6 @@ void inicializarSensorLDR();
 void verificarConexaoWiFi();
 void gerenciarBLE();
 void piscarLED();
-void inicializarMQTT();
-void conectarMQTT();
-void publicarSensoresMQTT();
-void publicarStatusMQTT();
-void callbackMQTT(char* topic, byte* payload, unsigned int length);
-void gerenciarMQTT();
 void salvarNoFirebase();
 
 class MyServerCallbacks: public BLEServerCallbacks {
@@ -1512,233 +1486,6 @@ void piscarLED() {
   }
 }
 
-// ==================== SETUP ====================
-// ==================== MQTT ====================
-
-/**
- * Callback quando mensagem MQTT é recebida (comandos do app)
- */
-void callbackMQTT(char* topic, byte* payload, unsigned int length) {
-  String mensagem = "";
-  for (unsigned int i = 0; i < length; i++) {
-    mensagem += (char)payload[i];
-  }
-  
-  Serial.print("[MQTT] Recebido em ");
-  Serial.print(topic);
-  Serial.print(": ");
-  Serial.println(mensagem);
-  
-  // Processar comandos recebidos via MQTT
-  if (String(topic) == String(MQTT_TOPIC_COMANDOS)) {
-    StaticJsonDocument<256> doc;
-    DeserializationError error = deserializeJson(doc, mensagem);
-    if (error) {
-      Serial.println("[MQTT] Erro ao parsear comando JSON");
-      return;
-    }
-    
-    String comando = doc["comando"] | "";
-    String resposta = "";
-    
-    if (comando == "led_on") {
-      ligarLED();
-      resposta = "{\"status\":\"ok\",\"comando\":\"led_on\",\"estado\":true}";
-    } else if (comando == "led_off") {
-      desligarLED();
-      resposta = "{\"status\":\"ok\",\"comando\":\"led_off\",\"estado\":false}";
-    } else if (comando == "led_toggle") {
-      estado.led = !estado.led;
-      digitalWrite(LED_PIN, estado.led ? HIGH : LOW);
-      resposta = "{\"status\":\"ok\",\"comando\":\"led_toggle\",\"estado\":" + String(estado.led ? "true" : "false") + "}";
-    } else if (comando == "rele1_on") {
-      ligarRele(1);
-      resposta = "{\"status\":\"ok\",\"comando\":\"rele1_on\",\"estado\":true}";
-    } else if (comando == "rele1_off") {
-      desligarRele(1);
-      resposta = "{\"status\":\"ok\",\"comando\":\"rele1_off\",\"estado\":false}";
-    } else if (comando == "rele2_on") {
-      ligarRele(2);
-      resposta = "{\"status\":\"ok\",\"comando\":\"rele2_on\",\"estado\":true}";
-    } else if (comando == "rele2_off") {
-      desligarRele(2);
-      resposta = "{\"status\":\"ok\",\"comando\":\"rele2_off\",\"estado\":false}";
-    } else if (comando == "sensores") {
-      // Forçar publicação imediata dos sensores
-      publicarSensoresMQTT();
-      return;
-    } else if (comando == "status") {
-      publicarStatusMQTT();
-      return;
-    } else {
-      resposta = "{\"status\":\"erro\",\"mensagem\":\"Comando desconhecido: " + comando + "\"}";
-    }
-    
-    if (resposta.length() > 0) {
-      mqttClient.publish(MQTT_TOPIC_RESPOSTA, resposta.c_str());
-    }
-  }
-}
-
-/**
- * Inicializa MQTT com HiveMQ Cloud (TLS)
- */
-void inicializarMQTT() {
-  Serial.println("\n=== INICIALIZANDO MQTT (HiveMQ Cloud) ===");
-  
-  // Sem verificação de certificado (aceita qualquer cert do servidor)
-  espClient.setInsecure();
-  
-  mqttClient.setServer(mqtt_server, mqtt_port);
-  mqttClient.setCallback(callbackMQTT);
-  mqttClient.setBufferSize(1024); // Buffer maior para JSON dos sensores
-  
-  Serial.print("Broker: ");
-  Serial.println(mqtt_server);
-  Serial.print("Porta: ");
-  Serial.println(mqtt_port);
-  Serial.println("✓ MQTT configurado");
-}
-
-/**
- * Conecta ao broker MQTT HiveMQ Cloud
- */
-void conectarMQTT() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  
-  unsigned long agora = millis();
-  if (agora - ultimaTentativaMQTT < INTERVALO_RETRY_MQTT) return;
-  ultimaTentativaMQTT = agora;
-  
-  Serial.print("[MQTT] Conectando a ");
-  Serial.print(mqtt_server);
-  Serial.print("...");
-
-  // Timeouts curtos para nao bloquear o loop (WDT dispara apos ~15s)
-  espClient.setTimeout(5);      // Max 5s para TLS handshake
-  mqttClient.setSocketTimeout(3); // Max 3s por leitura/escrita
-  
-  if (mqttClient.connect(mqtt_client_id, mqtt_user, mqtt_password)) {
-    mqttConectado = true;
-    Serial.println(" ✓ Conectado!");
-    
-    // Subscrever tópico de comandos
-    mqttClient.subscribe(MQTT_TOPIC_COMANDOS);
-    Serial.print("[MQTT] Subscrito em: ");
-    Serial.println(MQTT_TOPIC_COMANDOS);
-    
-    // Publicar status online
-    String onlineMsg = "{\"status\":\"online\",\"ip\":\"" + WiFi.localIP().toString() + "\",\"dispositivo\":\"NecroSENSE ESP32\"}";
-    mqttClient.publish(MQTT_TOPIC_STATUS, onlineMsg.c_str(), true); // retain=true
-    
-    // Aguardar timer de 30s para primeira publicacao (evita duplicata no reconnect apos Firebase)
-    ultimaPublicacaoMQTT = millis();
-  } else {
-    mqttConectado = false;
-    Serial.print(" ✗ Falha (rc=");
-    Serial.print(mqttClient.state());
-    Serial.println(")");
-    Serial.println("  Verifique: servidor, usuário e senha do HiveMQ Cloud");
-  }
-}
-
-/**
- * Publica dados dos sensores via MQTT
- */
-void publicarSensoresMQTT() {
-  if (!mqttClient.connected()) return;
-  
-  StaticJsonDocument<768> doc;
-  
-  // BME280
-  JsonObject bme = doc.createNestedObject("bme280");
-  bme["temperatura"] = round(estado.temperatura_bme280 * 100) / 100.0;
-  bme["umidade"] = round(estado.umidade_bme280 * 100) / 100.0;
-  bme["pressao"] = round(estado.pressao * 100) / 100.0;
-  bme["disponivel"] = estado.bme280Disponivel;
-  
-  // DHT22
-  JsonObject dht = doc.createNestedObject("dht22");
-  dht["temperatura"] = round(estado.temperatura_dht22 * 100) / 100.0;
-  dht["umidade"] = round(estado.umidade_dht22 * 100) / 100.0;
-  dht["disponivel"] = estado.dht22Disponivel;
-  
-  // UV
-  JsonObject uv = doc.createNestedObject("uv");
-  uv["nivel"] = estado.nivelUV;
-  uv["indice"] = round(estado.indiceUV * 100) / 100.0;
-  uv["disponivel"] = estado.uvDisponivel;
-  
-  // LDR - Luminosidade
-  JsonObject ldr = doc.createNestedObject("luminosidade");
-  ldr["nivel"] = estado.nivelLDR;
-  ldr["percentual"] = round(estado.luminosidade * 100) / 100.0;
-  ldr["disponivel"] = estado.ldrDisponivel;
-  
-  // Estado dos atuadores
-  JsonObject atuadores = doc.createNestedObject("atuadores");
-  atuadores["led"] = estado.led;
-  atuadores["rele1"] = estado.rele1;
-  atuadores["rele2"] = estado.rele2;
-  
-  doc["uptime"] = millis() / 1000;
-  doc["sd_card"] = estado.cartaoSDconectado;
-  
-  char buffer[768];
-  serializeJson(doc, buffer);
-  
-  bool ok = mqttClient.publish(MQTT_TOPIC_SENSORES, buffer);
-  if (ok) {
-    Serial.println("[MQTT] ✓ Sensores publicados");
-  } else {
-    Serial.println("[MQTT] ✗ Falha ao publicar sensores");
-  }
-}
-
-/**
- * Publica status do dispositivo via MQTT
- */
-void publicarStatusMQTT() {
-  if (!mqttClient.connected()) return;
-  
-  String json = "{";
-  json += "\"status\":\"online\",";
-  json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
-  json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
-  json += "\"uptime\":" + String(millis() / 1000) + ",";
-  json += "\"sd_card\":\"" + String(estado.cartaoSDconectado ? "conectado" : "desconectado") + "\",";
-  json += "\"sensores_ativos\":{";
-  json += "\"bme280\":" + String(estado.bme280Disponivel ? "true" : "false") + ",";
-  json += "\"dht22\":" + String(estado.dht22Disponivel ? "true" : "false") + ",";
-  json += "\"uv\":" + String(estado.uvDisponivel ? "true" : "false") + ",";
-  json += "\"ldr\":" + String(estado.ldrDisponivel ? "true" : "false");
-  json += "}}";
-  
-  mqttClient.publish(MQTT_TOPIC_STATUS, json.c_str(), true);
-  Serial.println("[MQTT] ✓ Status publicado");
-}
-
-/**
- * Gerencia conexão MQTT no loop
- */
-void gerenciarMQTT() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  
-  if (!mqttClient.connected()) {
-    mqttConectado = false;
-    conectarMQTT();
-    return;
-  }
-  
-  mqttClient.loop();
-  
-  // Publicar sensores periodicamente
-  unsigned long agora = millis();
-  if (agora - ultimaPublicacaoMQTT >= MQTT_PUBLISH_INTERVAL) {
-    ultimaPublicacaoMQTT = agora;
-    publicarSensoresMQTT();
-  }
-}
 
 /**
  * Salva leitura dos sensores diretamente no Firebase via HTTPS.
@@ -1781,27 +1528,19 @@ void salvarNoFirebase() {
   doc["sd_card"]   = estado.cartaoSDconectado;
   doc["wifi_rssi"] = WiFi.RSSI();
   doc["free_heap"] = ESP.getFreeHeap();
-  doc["mqtt_ok"]   = mqttConectado;
 
   char body[512];
   serializeJson(doc, body);
 
   Serial.printf("[Firebase] Tentando salvar... (heap: %u)\n", ESP.getFreeHeap());
 
-  // Desconectar MQTT para liberar a sessao TLS do espClient global
-  if (mqttClient.connected()) {
-    Serial.println("[Firebase] Pausando MQTT...");
-    mqttClient.disconnect();
-    mqttConectado = false;
-  }
-  espClient.stop();   // Liberar TLS mesmo que MQTT ja estivesse desconectado
-  delay(500);          // Tempo para TCP stack liberar buffers e heap consolidar
+  espClient.stop();   // Liberar conexao anterior
+  delay(300);          // Aguardar heap consolidar
 
   uint32_t heapLivre = ESP.getFreeHeap();
   Serial.printf("[Firebase] Heap apos liberar espClient: %u\n", heapLivre);
   if (heapLivre < 30000) {
     Serial.println("[Firebase] Heap insuficiente, pulando save");
-    ultimaTentativaMQTT = 0;
     return;
   }
 
@@ -1834,10 +1573,8 @@ void salvarNoFirebase() {
     Serial.printf("[Firebase] Falha https.begin() (heap: %u)\n", ESP.getFreeHeap());
   }
 
-  // Limpar e permitir MQTT reconectar no proximo ciclo
   espClient.stop();
   delay(50);
-  ultimaTentativaMQTT = 0; // Reconectar MQTT imediatamente
 
   // Se falhou (heap fragmentado), retry rapido em 5s em vez de esperar 30s
   if (!sucesso) {
@@ -1884,9 +1621,6 @@ void setup() {
   // Conectar WiFi
   inicializarWiFi();
   
-  // Inicializar MQTT (HiveMQ Cloud)
-  inicializarMQTT();
-
   // Sincronizar hora via NTP (UTC-3 Brasilia)
   configTime(-3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
   Serial.print("[NTP] Sincronizando hora");
@@ -1895,7 +1629,7 @@ void setup() {
   if (getLocalTime(&ti)) { char buf[30]; strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &ti); Serial.printf("\n[NTP] ✓ %s\n", buf); }
   else Serial.println("\n[NTP] ✗ Falha (usará uptime no timestamp)");
 
-  Serial.println("[Firebase] Timer ativo no loop() - salva a cada 30s independente do MQTT");
+  Serial.println("[Firebase] Timer ativo no loop() - salva a cada 30s");
 
   // Configurar rotas
   configurarRotas();
@@ -1952,9 +1686,6 @@ void loop() {
   // Processar requisições HTTP
   server.handleClient();
   
-  // Gerenciar MQTT (conectar/reconectar/publicar)
-  gerenciarMQTT();
-
   // Firebase: salvar a cada 30s (roda no loop, bloqueia ~5-15s mas garante que funciona)
   if (WiFi.status() == WL_CONNECTED) {
     unsigned long agoraFb = millis();

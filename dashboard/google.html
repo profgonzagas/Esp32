@@ -1,10 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NecroSENSE - Dashboard (Firebase)</title>
-    <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <!-- Firebase compat SDK (funciona com script classico, sem necessidade de modulos ES) -->
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -214,7 +213,7 @@
         <h1>&#9889; Necro<span>SENSE</span></h1>
         <div id="statusBadge" class="status-badge offline">
             <div class="status-dot"></div>
-            <span id="statusText">Desconectado</span>
+            <span id="statusText">Aguardando Firebase</span>
         </div>
         <div id="fbBadge" class="status-badge fb-err">
             <div class="status-dot"></div>
@@ -227,7 +226,6 @@
         <button onclick="exportCSV()">&#128202; Exportar CSV</button>
         <button class="fb-btn" onclick="exportFromFirebase()">&#9729; Exportar Firebase</button>
         <button onclick="clearData()">&#128465; Limpar</button>
-        <button id="btnConnect" class="primary" onclick="toggleConnection()">Conectar</button>
     </div>
 </header>
 
@@ -307,20 +305,6 @@
 
 <div id="logPanel" class="log-panel"></div>
 
-<!-- Modal de Login MQTT -->
-<div id="loginModal" class="modal-overlay hidden">
-    <div class="modal">
-        <h2>&#128274; Conectar ao MQTT</h2>
-        <p>Insira as credenciais do HiveMQ Cloud para visualizar os dados dos sensores em tempo real.</p>
-        <label for="mqttUser">Usuario</label>
-        <input type="text" id="mqttUser" placeholder="usuario" autocomplete="username">
-        <label for="mqttPass">Senha</label>
-        <input type="password" id="mqttPass" placeholder="senha" autocomplete="current-password">
-        <button class="primary" onclick="loginAndConnect()">Conectar</button>
-        <div class="hint">Credenciais salvas apenas nesta sessao do navegador.</div>
-    </div>
-</div>
-
 <!-- Modal de Configuracao Firebase -->
 <div id="fbModal" class="modal-overlay hidden">
     <div class="modal">
@@ -351,24 +335,12 @@
 
 <script>
 // ============================
-// CONFIGURACAO MQTT (HiveMQ Cloud via WebSocket)
-// ============================
-const MQTT_CONFIG = {
-    broker: 'wss://15fdb3019b4f41baa2bd95c3caf3722b.s1.eu.hivemq.cloud:8884/mqtt',
-    username: '',
-    password: '',
-    clientId: 'WebDash_' + Math.random().toString(16).slice(2, 10),
-    topic: 'necrosense/sensores'
-};
-
-// ============================
 // ESTADO
 // ============================
-let client    = null;
-let fbDb      = null;   // instancia do Firebase Realtime Database
+let fbDb        = null;   // instancia do Firebase Realtime Database
+let fbListener  = null;   // listener de tempo real
 let dataHistory = [];
-let charts    = {};
-let fbSaveCount = 0;
+let charts      = {};
 
 // ============================
 // FIREBASE
@@ -464,49 +436,73 @@ function setFbStatus(ok, msg) {
     document.getElementById('infoFb').textContent = msg;
 }
 
-function fbSave(entry) {
-    if (!fbDb) return;
-    fbDb.ref('leituras').push(entry)
-        .then(() => {
-            fbSaveCount++;
-            setFbStatus(true, 'Firebase: ' + fbSaveCount + ' salvo' + (fbSaveCount > 1 ? 's' : ''));
-        })
-        .catch(e => {
-            addLog('err', 'Erro ao salvar Firebase: ' + e.message);
-            setFbStatus(false, 'Erro ao salvar');
-        });
-}
+function fbSave(entry) { /* nao usado - ESP32 salva direto */ }
 
 function loadFromFirebase() {
     if (!fbDb) return;
+    // Cancelar listener anterior se existir
+    if (fbListener) { fbListener.off(); fbListener = null; }
+
+    setLiveStatus(false, 'Carregando...');
     addLog('fb', 'Carregando historico do Firebase...');
     setFbStatus(true, 'Firebase: carregando...');
 
     fbDb.ref('leituras').orderByKey().once('value')
         .then(snap => {
+            let lastKey = null;
             if (!snap.exists()) {
-                addLog('fb', 'Firebase vazio, nenhum dado historico.');
+                addLog('fb', 'Firebase vazio, aguardando primeiro dado...');
                 setFbStatus(true, 'Firebase conectado (sem dados)');
-                return;
+            } else {
+                const vals = snap.val();
+                snap.forEach(child => { lastKey = child.key; });
+                dataHistory = Object.values(vals);
+                dataHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                updateCharts();
+                if (dataHistory.length > 0) {
+                    const last = dataHistory[dataHistory.length - 1];
+                    updateSummary(last);
+                    updateInfo(last);
+                }
+                setFbStatus(true, 'Firebase: ' + dataHistory.length + ' registros carregados');
+                addLog('fb', dataHistory.length + ' registros carregados do Firebase.');
             }
-            const vals = snap.val();
-            dataHistory = Object.values(vals);
-            // Ordenar por timestamp
-            dataHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-            updateCharts();
-            if (dataHistory.length > 0) {
-                const last = dataHistory[dataHistory.length - 1];
-                updateSummary(last);
-                updateInfo(last);
-            }
-            setFbStatus(true, 'Firebase: ' + dataHistory.length + ' registros carregados');
-            addLog('fb', dataHistory.length + ' registros carregados do Firebase.');
+            // Escutar novos dados em tempo real (apenas entradas apos o historico)
+            const query = lastKey
+                ? fbDb.ref('leituras').orderByKey().startAfter(lastKey)
+                : fbDb.ref('leituras').orderByKey();
+            fbListener = query;
+            query.on('child_added', childSnap => {
+                onNewEntry(childSnap.val());
+            });
+            setLiveStatus(true, 'Ao Vivo');
+            addLog('ok', 'Escutando Firebase em tempo real (~1s de latencia).');
         })
         .catch(e => {
             addLog('err', 'Erro ao ler Firebase: ' + e.message);
             setFbStatus(false, 'Erro ao ler Firebase');
+            setLiveStatus(false, 'Erro Firebase');
         });
+}
+
+function onNewEntry(entry) {
+    dataHistory.push(entry);
+    updateSummary(entry);
+    updateCharts();
+    updateInfo(entry);
+    const t   = entry.temp_bme  != null ? entry.temp_bme.toFixed(1)  + '°C' : '--';
+    const u   = entry.umid_bme  != null ? entry.umid_bme.toFixed(1)  + '%'  : '--';
+    const uv  = entry.indice_uv != null ? entry.indice_uv.toFixed(2)        : '--';
+    const ldr = entry.ldr_pct   != null ? entry.ldr_pct.toFixed(1)   + '%'  : '--';
+    addLog('ok', 'Novo dado: T=' + t + '  U=' + u + '  UV=' + uv + '  Luz=' + ldr);
+}
+
+function setLiveStatus(online, msg) {
+    const badge = document.getElementById('statusBadge');
+    const text  = document.getElementById('statusText');
+    badge.className = 'status-badge ' + (online ? 'online' : 'offline');
+    text.textContent = msg;
 }
 
 function clearFirebase() {
@@ -528,85 +524,6 @@ function clearFirebase() {
         .catch(e => addLog('err', 'Erro ao apagar Firebase: ' + e.message));
 }
 
-// ============================
-// MQTT
-// ============================
-function toggleConnection() {
-    if (client && client.connected) {
-        disconnect();
-    } else {
-        if (!MQTT_CONFIG.username || !MQTT_CONFIG.password) {
-            document.getElementById('loginModal').classList.remove('hidden');
-            return;
-        }
-        connect();
-    }
-}
-
-function loginAndConnect() {
-    const user = document.getElementById('mqttUser').value.trim();
-    const pass = document.getElementById('mqttPass').value.trim();
-    if (!user || !pass) { alert('Preencha usuario e senha'); return; }
-    MQTT_CONFIG.username = user;
-    MQTT_CONFIG.password = pass;
-    try { localStorage.setItem('mqtt_u', user); localStorage.setItem('mqtt_p', pass); } catch(e) {}
-    document.getElementById('loginModal').classList.add('hidden');
-    connect();
-}
-
-function connect() {
-    addLog('info', 'Conectando ao HiveMQ Cloud...');
-
-    client = mqtt.connect(MQTT_CONFIG.broker, {
-        username: MQTT_CONFIG.username,
-        password: MQTT_CONFIG.password,
-        clientId: MQTT_CONFIG.clientId,
-        protocol: 'wss',
-        reconnectPeriod: 5000,
-        connectTimeout: 10000,
-        rejectUnauthorized: false
-    });
-
-    client.on('connect', () => {
-        addLog('ok', 'Conectado ao HiveMQ Cloud!');
-        setStatus(true);
-        client.subscribe(MQTT_CONFIG.topic, { qos: 0 }, (err) => {
-            if (err) {
-                addLog('err', 'Erro ao assinar topico: ' + err.message);
-            } else {
-                addLog('ok', 'Inscrito em: ' + MQTT_CONFIG.topic);
-            }
-        });
-    });
-
-    client.on('message', (topic, message) => {
-        try {
-            const data = JSON.parse(message.toString());
-            processData(data);
-        } catch (e) {
-            addLog('err', 'JSON invalido: ' + e.message);
-        }
-    });
-
-    client.on('error',     (err) => { addLog('err',  'Erro MQTT: ' + err.message); setStatus(false); });
-    client.on('close',     ()    => { addLog('info', 'Conexao fechada'); setStatus(false); });
-    client.on('reconnect', ()    => { addLog('info', 'Reconectando...'); });
-}
-
-function disconnect() {
-    if (client) { client.end(true); client = null; }
-    setStatus(false);
-    addLog('info', 'Desconectado manualmente');
-}
-
-function setStatus(online) {
-    const badge = document.getElementById('statusBadge');
-    const text  = document.getElementById('statusText');
-    const btn   = document.getElementById('btnConnect');
-    badge.className  = 'status-badge ' + (online ? 'online' : 'offline');
-    text.textContent = online ? 'Conectado' : 'Desconectado';
-    btn.textContent  = online ? 'Desconectar' : 'Conectar';
-}
 
 // ============================
 // PROCESSAR DADOS
@@ -620,32 +537,6 @@ function toLocalISO(date) {
     return local.toISOString().slice(0, -1) + sign + hh + ':' + mm;
 }
 
-function processData(raw) {
-    const now = new Date();
-    const entry = {
-        timestamp: toLocalISO(now),
-        temp_bme:  raw.bme280?.temperatura   ?? null,
-        umid_bme:  raw.bme280?.umidade       ?? null,
-        pressao:   raw.bme280?.pressao       ?? null,
-        temp_dht:  raw.dht22?.temperatura    ?? null,
-        umid_dht:  raw.dht22?.umidade        ?? null,
-        indice_uv: raw.uv?.indice            ?? null,
-        nivel_uv:  raw.uv?.nivel             ?? null,
-        ldr_pct:   raw.luminosidade?.percentual ?? null,
-        ldr_nivel: raw.luminosidade?.nivel   ?? null,
-        uptime:    raw.uptime                ?? null,
-        sd_card:   raw.sd_card               ?? null
-    };
-
-    dataHistory.push(entry);
-
-    // ESP32 salva direto no Firebase a cada 30s (nao duplicar aqui)
-
-    updateSummary(entry);
-    updateCharts();
-    updateInfo(entry);
-    addLog('ok', `Dados: T=${entry.temp_bme}°C  U=${entry.umid_bme}%  P=${entry.pressao}hPa  UV=${entry.indice_uv}  Luz=${entry.ldr_pct}%`);
-}
 
 function updateSummary(d) {
     document.getElementById('valTemp').textContent  = d.temp_bme  !== null ? d.temp_bme.toFixed(1)  + '°C' : '--';
@@ -900,19 +791,6 @@ window.addEventListener('DOMContentLoaded', () => {
         initFirebase(savedCfg);
     } else {
         addLog('fb', 'Firebase nao configurado. Clique no botao "Firebase" para configurar.');
-    }
-
-    // Restaurar credenciais MQTT salvas
-    const savedU = localStorage.getItem('mqtt_u');
-    const savedP = localStorage.getItem('mqtt_p');
-    if (savedU && savedP) {
-        MQTT_CONFIG.username = savedU;
-        MQTT_CONFIG.password = savedP;
-        document.getElementById('loginModal').classList.add('hidden');
-        addLog('info', 'Credenciais MQTT restauradas. Conectando...');
-        connect();
-    } else {
-        addLog('info', 'Dashboard carregado. Clique "Conectar" para iniciar o MQTT.');
     }
 });
 </script>
