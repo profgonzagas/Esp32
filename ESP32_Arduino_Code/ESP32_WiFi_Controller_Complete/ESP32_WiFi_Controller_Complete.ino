@@ -1555,6 +1555,7 @@ void conectarMQTT() {
   Serial.print(mqtt_server);
   Serial.print("...");
   
+  mqttClient.setSocketTimeout(3); // Max 3s por tentativa de conexao MQTT
   if (mqttClient.connect(mqtt_client_id, mqtt_user, mqtt_password)) {
     mqttConectado = true;
     Serial.println(" ✓ Conectado!");
@@ -1691,7 +1692,9 @@ void salvarNoFirebase() {
   // Enviar via HTTPS
   WiFiClientSecure fbClient;
   fbClient.setInsecure(); // Aceita qualquer certificado (sem validacao de CA)
+  fbClient.setTimeout(8000); // Timeout de 8 segundos para nao travar o loop
   HTTPClient https;
+  https.setTimeout(8000); // Timeout total da operacao HTTP
   if (https.begin(fbClient, FIREBASE_URL)) {
     https.addHeader("Content-Type", "application/json");
     int code = https.POST(body);
