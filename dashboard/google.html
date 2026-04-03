@@ -491,11 +491,20 @@ function onNewEntry(entry) {
     updateSummary(entry);
     updateCharts();
     updateInfo(entry);
-    const t   = entry.temp_bme  != null ? entry.temp_bme.toFixed(1)  + '°C' : '--';
-    const u   = entry.umid_bme  != null ? entry.umid_bme.toFixed(1)  + '%'  : '--';
-    const uv  = entry.indice_uv != null ? entry.indice_uv.toFixed(2)        : '--';
-    const ldr = entry.ldr_pct   != null ? entry.ldr_pct.toFixed(1)   + '%'  : '--';
-    addLog('ok', 'Novo dado: T=' + t + '  U=' + u + '  UV=' + uv + '  Luz=' + ldr);
+    const f = (v, dec, unit) => v != null ? v.toFixed(dec) + unit : '--';
+    const parts = [
+        'T_BME='  + f(entry.temp_bme,  1, '°C'),
+        'U_BME='  + f(entry.umid_bme,  1, '%'),
+        'P='      + f(entry.pressao,   1, 'hPa'),
+        'T_DHT='  + f(entry.temp_dht,  1, '°C'),
+        'U_DHT='  + f(entry.umid_dht,  1, '%'),
+        'UV='     + f(entry.indice_uv, 2, '') + (entry.nivel_uv  ? '(' + entry.nivel_uv  + ')' : ''),
+        'Luz='    + f(entry.ldr_pct,   1, '%') + (entry.ldr_nivel ? '(' + entry.ldr_nivel + ')' : ''),
+        'Up='     + (entry.uptime != null ? entry.uptime + 's' : '--'),
+        'SD='     + (entry.sd_card != null ? (entry.sd_card ? 'OK' : 'N/A') : '--'),
+        'RSSI='   + (entry.wifi_rssi != null ? entry.wifi_rssi + 'dBm' : '--'),
+    ];
+    addLog('ok', 'Novo dado &mdash; ' + parts.join('  '));
 }
 
 function setLiveStatus(online, msg) {
