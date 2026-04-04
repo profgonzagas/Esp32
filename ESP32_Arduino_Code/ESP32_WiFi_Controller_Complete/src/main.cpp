@@ -1009,6 +1009,11 @@ void lerSensoresBME280(bool forcado) {
     estado.ultimaTentativaBME280 = agora;
     
     Serial.println("[BME280] 🔄 Tentando reconectar...");
+    // Reset do barramento I2C antes de tentar reconectar
+    Wire.end();
+    delay(50);
+    Wire.begin(SDA_PIN, SCL_PIN);
+    delay(50);
     // Tentar ambos endereços
     if (bme280.begin(BME280_ADDRESS_1)) {
       estado.bme280Endereco = BME280_ADDRESS_1;
@@ -1022,6 +1027,14 @@ void lerSensoresBME280(bool forcado) {
       Serial.println("[BME280] ⚠ Sensor não encontrado (próxima tentativa em 10s)");
       return;
     }
+    // CRÍTICO: sem setSampling(), o sensor fica em forced mode e repete o mesmo valor
+    bme280.setSampling(Adafruit_BME280::MODE_NORMAL,
+                       Adafruit_BME280::SAMPLING_X2,
+                       Adafruit_BME280::SAMPLING_X16,
+                       Adafruit_BME280::SAMPLING_X2,
+                       Adafruit_BME280::FILTER_X16,
+                       Adafruit_BME280::STANDBY_MS_0_5);
+    delay(100); // Aguardar primeiro ciclo de medição em modo normal
   }
   
   if (forcado || millis() - estado.ultimaLeituraTemp >= estado.INTERVALO_LEITURA) {

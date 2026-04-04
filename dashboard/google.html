@@ -491,7 +491,7 @@ function onNewEntry(entry) {
     updateSummary(entry);
     updateCharts();
     updateInfo(entry);
-    const f = (v, dec, unit) => v != null ? v.toFixed(dec) + unit : '--';
+    const f = (v, dec, unit) => (v != null && !isNaN(v)) ? Number(v).toFixed(dec) + unit : '--';
     const parts = [
         'T_BME='  + f(entry.temp_bme,  1, '°C'),
         'U_BME='  + f(entry.umid_bme,  1, '%'),
@@ -548,11 +548,12 @@ function toLocalISO(date) {
 
 
 function updateSummary(d) {
-    document.getElementById('valTemp').textContent  = d.temp_bme  !== null ? d.temp_bme.toFixed(1)  + '°C' : '--';
-    document.getElementById('valUmid').textContent  = d.umid_bme  !== null ? d.umid_bme.toFixed(1)  + '%'  : '--';
-    document.getElementById('valPress').textContent = d.pressao   !== null ? d.pressao.toFixed(1)          : '--';
-    document.getElementById('valUV').textContent    = d.indice_uv !== null ? d.indice_uv.toFixed(1)        : '--';
-    document.getElementById('valLDR').textContent   = d.ldr_pct   !== null ? d.ldr_pct.toFixed(1)   + '%'  : '--';
+    const fmt = (v, dec, unit) => (v != null && !isNaN(v)) ? Number(v).toFixed(dec) + unit : '--';
+    document.getElementById('valTemp').textContent  = fmt(d.temp_bme,  1, '°C');
+    document.getElementById('valUmid').textContent  = fmt(d.umid_bme,  1, '%');
+    document.getElementById('valPress').textContent = fmt(d.pressao,   1, '');
+    document.getElementById('valUV').textContent    = fmt(d.indice_uv, 1, '');
+    document.getElementById('valLDR').textContent   = fmt(d.ldr_pct,   1, '%');
 
     const uv = d.indice_uv || 0;
     let cls;
